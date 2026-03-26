@@ -3,7 +3,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from config import DATABASE_PATH
+from config import settings
+from models import User, Item, Template, TemplateWithCount, TemplateItem
 from utils import extract_quantity_parts, get_unit_group
 
 
@@ -96,7 +97,9 @@ async def _init_tables(db: aiosqlite.Connection) -> None:
 
 
 @asynccontextmanager
-async def get_db(db_path: str = DATABASE_PATH):
+async def get_db(db_path: str = None):
+    if db_path is None:
+        db_path = settings.database_path
     db = await aiosqlite.connect(db_path)
     db.row_factory = aiosqlite.Row
     await _init_tables(db)
@@ -153,17 +156,17 @@ async def reject_user(db: aiosqlite.Connection, telegram_id: int) -> bool:
 
 async def get_user_by_telegram_id(
     db: aiosqlite.Connection, telegram_id: int
-) -> Optional[Dict[str, Any]]:
+) -> Optional[User]:
     cursor = await db.execute(
         "SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)
     )
     row = await cursor.fetchone()
-    return dict(row) if row else None
+    return User.model_validate(dict(row)) if row else None
 
 
 async def get_user_by_username(
     db: aiosqlite.Connection, username: str
-) -> Optional[Dict[str, Any]]:
+) -> Optional[User]:
     if username.startswith("@"):
         username = username[1:]
 
@@ -172,12 +175,12 @@ async def get_user_by_username(
         (username,),
     )
     row = await cursor.fetchone()
-    return dict(row) if row else None
+    return User.model_validate(dict(row)) if row else None
 
 
 async def get_user_by_username_all(
     db: aiosqlite.Connection, username: str
-) -> Optional[Dict[str, Any]]:
+) -> Optional[User]:
     if username.startswith("@"):
         username = username[1:]
 
@@ -186,7 +189,7 @@ async def get_user_by_username_all(
         (username,),
     )
     row = await cursor.fetchone()
-    return dict(row) if row else None
+    return User.model_validate(dict(row)) if row else None
 
 
 async def is_user_allowed(db: aiosqlite.Connection, telegram_id: int) -> bool:
@@ -204,20 +207,20 @@ async def remove_user(db: aiosqlite.Connection, telegram_id: int) -> bool:
     return cursor.rowcount > 0
 
 
-async def get_all_users(db: aiosqlite.Connection) -> List[Dict[str, Any]]:
+async def get_all_users(db: aiosqlite.Connection) -> List[User]:
     cursor = await db.execute(
         "SELECT * FROM users WHERE is_approved = TRUE ORDER BY created_at"
     )
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return [User.model_validate(dict(row)) for row in rows]
 
 
-async def get_pending_users(db: aiosqlite.Connection) -> List[Dict[str, Any]]:
+async def get_pending_users(db: aiosqlite.Connection) -> List[User]:
     cursor = await db.execute(
         "SELECT * FROM users WHERE is_approved = FALSE ORDER BY created_at"
     )
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return [User.model_validate(dict(row)) for row in rows]
 
 
 async def get_approved_telegram_ids(db: aiosqlite.Connection) -> List[int]:
@@ -245,34 +248,32 @@ async def add_item(
     return cursor.lastrowid
 
 
-async def get_all_items(db: aiosqlite.Connection) -> List[Dict[str, Any]]:
+async def get_all_items(db: aiosqlite.Connection) -> List[Item]:
     cursor = await db.execute("SELECT * FROM items ORDER BY created_at")
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return [Item.model_validate(dict(row)) for row in rows]
 
 
-async def get_pending_items(db: aiosqlite.Connection) -> List[Dict[str, Any]]:
+async def get_pending_items(db: aiosqlite.Connection) -> List[Item]:
     cursor = await db.execute(
         "SELECT * FROM items WHERE is_purchased = FALSE ORDER BY created_at"
     )
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return [Item.model_validate(dict(row)) for row in rows]
 
 
-async def get_purchased_items(db: aiosqlite.Connection) -> List[Dict[str, Any]]:
+async def get_purchased_items(db: aiosqlite.Connection) -> List[Item]:
     cursor = await db.execute(
         "SELECT * FROM items WHERE is_purchased = TRUE ORDER BY purchased_at DESC"
     )
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return [Item.model_validate(dict(row)) for row in rows]
 
 
-async def get_item_by_id(
-    db: aiosqlite.Connection, item_id: int
-) -> Optional[Dict[str, Any]]:
+async def get_item_by_id(db: aiosqlite.Connection, item_id: int) -> Optional[Item]:
     cursor = await db.execute("SELECT * FROM items WHERE id = ?", (item_id,))
     row = await cursor.fetchone()
-    return dict(row) if row else None
+    return Item.model_validate(dict(row)) if row else None
 
 
 async def mark_as_purchased(
@@ -317,7 +318,7 @@ async def remove_item(db: aiosqlite.Connection, item_id: int) -> bool:
 
 async def find_pending_item_by_name_and_unit(
     db: aiosqlite.Connection, name: str, unit: str
-) -> Optional[Dict[str, Any]]:
+) -> Optional[Item]:
     cursor = await db.execute("SELECT * FROM items WHERE is_purchased = FALSE")
     rows = await cursor.fetchall()
 
@@ -325,48 +326,46 @@ async def find_pending_item_by_name_and_unit(
     unit_lower = unit.lower() if unit else ""
 
     for row in rows:
-        row_dict = dict(row)
-        if row_dict["name"].lower() == name_lower and row_dict["quantity"]:
-            _, row_unit = extract_quantity_parts(row_dict["quantity"])
+        item = Item.model_validate(dict(row))
+        if item.name.lower() == name_lower and item.quantity:
+            _, row_unit = extract_quantity_parts(item.quantity)
             if row_unit == unit_lower:
-                return row_dict
+                return item
     return None
 
 
 async def find_pending_item_by_name(
     db: aiosqlite.Connection, name: str, quantity: Optional[str] = None
-) -> Optional[Dict[str, Any]]:
+) -> Optional[Item]:
     cursor = await db.execute("SELECT * FROM items WHERE is_purchased = FALSE")
     rows = await cursor.fetchall()
 
     name_lower = name.lower()
 
     for row in rows:
-        row_dict = dict(row)
-        if row_dict["name"].lower() == name_lower and row_dict["quantity"] is None:
-            return row_dict
+        item = Item.model_validate(dict(row))
+        if item.name.lower() == name_lower and item.quantity is None:
+            return item
     return None
 
 
 async def find_pending_item_in_unit_group(
     db: aiosqlite.Connection, name: str, group: str
-) -> Optional[Dict[str, Any]]:
+) -> Optional[Item]:
     cursor = await db.execute("SELECT * FROM items WHERE is_purchased = FALSE")
     rows = await cursor.fetchall()
 
     name_lower = name.lower()
 
     for row in rows:
-        row_dict = dict(row)
-        if row_dict["name"].lower() == name_lower:
+        item = Item.model_validate(dict(row))
+        if item.name.lower() == name_lower:
             row_unit = (
-                extract_quantity_parts(row_dict["quantity"])[1]
-                if row_dict["quantity"]
-                else None
+                extract_quantity_parts(item.quantity)[1] if item.quantity else None
             )
             row_group = get_unit_group(row_unit)
             if row_group == group:
-                return row_dict
+                return item
     return None
 
 
@@ -381,7 +380,7 @@ async def update_item_quantity(
     return cursor.rowcount > 0
 
 
-async def get_all_items_ordered(db: aiosqlite.Connection) -> List[Dict[str, Any]]:
+async def get_all_items_ordered(db: aiosqlite.Connection) -> List[Item]:
     cursor = await db.execute(
         """
         SELECT * FROM items 
@@ -406,7 +405,7 @@ async def get_all_items_ordered(db: aiosqlite.Connection) -> List[Dict[str, Any]
         """
     )
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return [Item.model_validate(dict(row)) for row in rows]
 
 
 async def clear_purchased_items(db: aiosqlite.Connection) -> int:
@@ -424,7 +423,7 @@ async def create_template(db: aiosqlite.Connection, name: str) -> int:
     return cursor.lastrowid
 
 
-async def get_all_templates(db: aiosqlite.Connection) -> List[Dict[str, Any]]:
+async def get_all_templates(db: aiosqlite.Connection) -> List[TemplateWithCount]:
     cursor = await db.execute(
         """
         SELECT t.*, COUNT(ti.id) as item_count
@@ -435,31 +434,31 @@ async def get_all_templates(db: aiosqlite.Connection) -> List[Dict[str, Any]]:
         """
     )
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return [TemplateWithCount.model_validate(dict(row)) for row in rows]
 
 
 async def get_template_by_id(
     db: aiosqlite.Connection, template_id: int
-) -> Optional[Dict[str, Any]]:
+) -> Optional[Template]:
     cursor = await db.execute(
         "SELECT * FROM templates WHERE id = ?",
         (template_id,),
     )
     row = await cursor.fetchone()
-    return dict(row) if row else None
+    return Template.model_validate(dict(row)) if row else None
 
 
 async def get_template_by_name(
     db: aiosqlite.Connection, name: str
-) -> Optional[Dict[str, Any]]:
+) -> Optional[Template]:
     cursor = await db.execute("SELECT * FROM templates")
     rows = await cursor.fetchall()
 
     name_lower = name.lower()
     for row in rows:
-        row_dict = dict(row)
-        if row_dict["name"].lower() == name_lower:
-            return row_dict
+        template = Template.model_validate(dict(row))
+        if template.name.lower() == name_lower:
+            return template
     return None
 
 
@@ -503,24 +502,24 @@ async def add_item_to_template(
 
 async def get_template_items(
     db: aiosqlite.Connection, template_id: int
-) -> List[Dict[str, Any]]:
+) -> List[TemplateItem]:
     cursor = await db.execute(
         "SELECT * FROM template_items WHERE template_id = ? ORDER BY created_at",
         (template_id,),
     )
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return [TemplateItem.model_validate(dict(row)) for row in rows]
 
 
 async def get_template_item_by_id(
     db: aiosqlite.Connection, item_id: int
-) -> Optional[Dict[str, Any]]:
+) -> Optional[TemplateItem]:
     cursor = await db.execute(
         "SELECT * FROM template_items WHERE id = ?",
         (item_id,),
     )
     row = await cursor.fetchone()
-    return dict(row) if row else None
+    return TemplateItem.model_validate(dict(row)) if row else None
 
 
 async def remove_template_item(db: aiosqlite.Connection, item_id: int) -> bool:
@@ -544,32 +543,30 @@ async def update_template_item(
 
 
 async def create_template_from_items(
-    db: aiosqlite.Connection, name: str, items: List[Dict[str, Any]]
+    db: aiosqlite.Connection, name: str, items: List[Item]
 ) -> int:
     template_id = await create_template(db, name)
     for item in items:
         await add_item_to_template(
             db,
             template_id,
-            item["name"],
-            item.get("quantity"),
-            item.get("category", "other"),
+            item.name,
+            item.quantity,
+            item.category,
         )
     return template_id
 
 
 async def find_template_item_in_unit_group(
     db: aiosqlite.Connection, template_id: int, name: str, group: str
-) -> Optional[Dict[str, Any]]:
+) -> Optional[TemplateItem]:
     items = await get_template_items(db, template_id)
     name_lower = name.lower()
 
     for item in items:
-        if item["name"].lower() == name_lower:
+        if item.name.lower() == name_lower:
             item_unit = (
-                extract_quantity_parts(item["quantity"])[1]
-                if item["quantity"]
-                else None
+                extract_quantity_parts(item.quantity)[1] if item.quantity else None
             )
             item_group = get_unit_group(item_unit)
             if item_group == group:
@@ -631,7 +628,7 @@ async def get_all_product_categories(
 
 async def get_pending_items_ordered(
     db: aiosqlite.Connection,
-) -> List[Dict[str, Any]]:
+) -> List[Item]:
     cursor = await db.execute(
         """
         SELECT * FROM items 
@@ -656,12 +653,12 @@ async def get_pending_items_ordered(
         """
     )
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return [Item.model_validate(dict(row)) for row in rows]
 
 
 async def get_template_items_ordered(
     db: aiosqlite.Connection, template_id: int
-) -> List[Dict[str, Any]]:
+) -> List[TemplateItem]:
     cursor = await db.execute(
         """
         SELECT * FROM template_items 
@@ -687,4 +684,4 @@ async def get_template_items_ordered(
         (template_id,),
     )
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return [TemplateItem.model_validate(dict(row)) for row in rows]

@@ -5,12 +5,70 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from models import User, Item, Template, TemplateWithCount, TemplateItem
+
 
 def make_async_context_manager(return_value):
     cm = AsyncMock()
     cm.__aenter__.return_value = return_value
     cm.__aexit__.return_value = None
     return cm
+
+
+def make_user(
+    telegram_id=111222333,
+    username="test_user",
+    full_name="Test User",
+    is_approved=False,
+):
+    return User(
+        id=1,
+        telegram_id=telegram_id,
+        username=username,
+        full_name=full_name,
+        added_by=1,
+        is_approved=is_approved,
+    )
+
+
+def make_item(
+    id=1,
+    name="Test Item",
+    quantity="1шт",
+    added_by=123456,
+    added_by_name="Test User",
+    category="other",
+    is_purchased=False,
+):
+    return Item(
+        id=id,
+        name=name,
+        quantity=quantity if quantity else None,
+        added_by=added_by,
+        added_by_name=added_by_name,
+        is_purchased=is_purchased,
+        category=category,
+    )
+
+
+def make_template(id=1, name="Test Template", item_count=0):
+    return TemplateWithCount(
+        id=id,
+        name=name,
+        item_count=item_count,
+    )
+
+
+def make_template_item(
+    id=1, template_id=1, name="Test Item", quantity="1шт", category="other"
+):
+    return TemplateItem(
+        id=id,
+        template_id=template_id,
+        name=name,
+        quantity=quantity if quantity else None,
+        category=category,
+    )
 
 
 class TestHandlers:
@@ -64,7 +122,7 @@ class TestHandlers:
         with patch("handlers.get_db", return_value=make_async_context_manager(mock_db)):
             with patch("handlers.get_user_by_telegram_id", return_value=None):
                 with patch("handlers.add_pending_user", AsyncMock()):
-                    with patch("handlers.ADMIN_ID", 999999):
+                    with patch("handlers.settings.admin_id", 999999):
                         from handlers import cmd_start
 
                         mock_message.from_user.id = 111222333
@@ -77,11 +135,11 @@ class TestHandlers:
     @pytest.mark.asyncio
     async def test_cmd_start_pending_user_waiting(self, mock_message):
         mock_db = AsyncMock()
-        existing_user = {"telegram_id": 111222333, "is_approved": False}
+        existing_user = make_user(telegram_id=111222333, is_approved=False)
 
         with patch("handlers.get_db", return_value=make_async_context_manager(mock_db)):
             with patch("handlers.get_user_by_telegram_id", return_value=existing_user):
-                with patch("handlers.ADMIN_ID", 999999):
+                with patch("handlers.settings.admin_id", 999999):
                     from handlers import cmd_start
 
                     mock_message.from_user.id = 111222333
@@ -98,7 +156,7 @@ class TestHandlers:
         with patch("handlers.get_db", return_value=make_async_context_manager(mock_db)):
             with patch("handlers.get_user_by_telegram_id", return_value=None):
                 with patch("handlers.add_user", AsyncMock()):
-                    with patch("handlers.ADMIN_ID", 123456):
+                    with patch("handlers.settings.admin_id", 123456):
                         from handlers import cmd_start
 
                         mock_message.from_user.id = 123456
@@ -111,11 +169,11 @@ class TestHandlers:
     @pytest.mark.asyncio
     async def test_cmd_start_authorized_user(self, mock_message):
         mock_db = AsyncMock()
-        existing_user = {"telegram_id": 111222333, "is_approved": True}
+        existing_user = make_user(telegram_id=111222333, is_approved=True)
 
         with patch("handlers.get_db", return_value=make_async_context_manager(mock_db)):
             with patch("handlers.get_user_by_telegram_id", return_value=existing_user):
-                with patch("handlers.ADMIN_ID", 999999):
+                with patch("handlers.settings.admin_id", 999999):
                     from handlers import cmd_start
 
                     mock_message.from_user.id = 111222333
@@ -188,22 +246,20 @@ class TestHandlers:
     @pytest.mark.asyncio
     async def test_cmd_list_with_items(self, mock_message, mock_state):
         items = [
-            {
-                "id": 1,
-                "name": "молоко",
-                "quantity": "2л",
-                "added_by_name": "User1",
-                "is_purchased": 0,
-                "category": "dairy",
-            },
-            {
-                "id": 2,
-                "name": "хлеб",
-                "quantity": None,
-                "added_by_name": "User2",
-                "is_purchased": 0,
-                "category": "bakery",
-            },
+            make_item(
+                id=1,
+                name="молоко",
+                quantity="2л",
+                added_by_name="User1",
+                category="dairy",
+            ),
+            make_item(
+                id=2,
+                name="хлеб",
+                quantity=None,
+                added_by_name="User2",
+                category="bakery",
+            ),
         ]
         mock_db = AsyncMock()
 
@@ -234,7 +290,7 @@ class TestHandlers:
 
     @pytest.mark.asyncio
     async def test_cmd_done_success(self, mock_message):
-        items = [{"id": 1, "name": "молоко", "quantity": "2л"}]
+        items = [make_item(id=1, name="молоко", quantity="2л")]
         mock_db = AsyncMock()
 
         with patch("handlers.check_access", return_value=True):
@@ -274,7 +330,7 @@ class TestHandlers:
 
     @pytest.mark.asyncio
     async def test_cmd_allow_not_admin(self, mock_message):
-        with patch("handlers.ADMIN_ID", 999999):
+        with patch("handlers.settings.admin_id", 999999):
             from handlers import cmd_allow
 
             mock_message.from_user.id = 123456
@@ -288,13 +344,11 @@ class TestHandlers:
     @pytest.mark.asyncio
     async def test_cmd_allow_by_username_pending(self, mock_message):
         mock_db = AsyncMock()
-        target_user = {
-            "telegram_id": 987654,
-            "username": "target",
-            "is_approved": False,
-        }
+        target_user = make_user(
+            telegram_id=987654, username="target", is_approved=False
+        )
 
-        with patch("handlers.ADMIN_ID", 123456):
+        with patch("handlers.settings.admin_id", 123456):
             with patch(
                 "handlers.get_db", return_value=make_async_context_manager(mock_db)
             ):
@@ -316,7 +370,7 @@ class TestHandlers:
     async def test_cmd_allow_by_username_not_found(self, mock_message):
         mock_db = AsyncMock()
 
-        with patch("handlers.ADMIN_ID", 123456):
+        with patch("handlers.settings.admin_id", 123456):
             with patch(
                 "handlers.get_db", return_value=make_async_context_manager(mock_db)
             ):
@@ -334,9 +388,9 @@ class TestHandlers:
     @pytest.mark.asyncio
     async def test_cmd_allow_already_approved(self, mock_message):
         mock_db = AsyncMock()
-        target_user = {"telegram_id": 987654, "username": "target", "is_approved": True}
+        target_user = make_user(telegram_id=987654, username="target", is_approved=True)
 
-        with patch("handlers.ADMIN_ID", 123456):
+        with patch("handlers.settings.admin_id", 123456):
             with patch(
                 "handlers.get_db", return_value=make_async_context_manager(mock_db)
             ):
@@ -357,7 +411,7 @@ class TestHandlers:
     async def test_cmd_pending_empty(self, mock_message):
         mock_db = AsyncMock()
 
-        with patch("handlers.ADMIN_ID", 123456):
+        with patch("handlers.settings.admin_id", 123456):
             with patch(
                 "handlers.get_db", return_value=make_async_context_manager(mock_db)
             ):
@@ -375,11 +429,11 @@ class TestHandlers:
     async def test_cmd_pending_with_users(self, mock_message):
         mock_db = AsyncMock()
         pending_users = [
-            {"telegram_id": 111, "username": "user1", "full_name": "User One"},
-            {"telegram_id": 222, "username": None, "full_name": "User Two"},
+            make_user(telegram_id=111, username="user1", full_name="User One"),
+            make_user(telegram_id=222, username=None, full_name="User Two"),
         ]
 
-        with patch("handlers.ADMIN_ID", 123456):
+        with patch("handlers.settings.admin_id", 123456):
             with patch(
                 "handlers.get_db", return_value=make_async_context_manager(mock_db)
             ):
@@ -396,7 +450,7 @@ class TestHandlers:
 
     @pytest.mark.asyncio
     async def test_cmd_pending_not_admin(self, mock_message):
-        with patch("handlers.ADMIN_ID", 999999):
+        with patch("handlers.settings.admin_id", 999999):
             from handlers import cmd_pending
 
             mock_message.from_user.id = 123456
@@ -415,7 +469,7 @@ class TestHandlers:
             "is_approved": False,
         }
 
-        with patch("handlers.ADMIN_ID", 123456):
+        with patch("handlers.settings.admin_id", 123456):
             with patch(
                 "handlers.get_db", return_value=make_async_context_manager(mock_db)
             ):
@@ -439,7 +493,7 @@ class TestHandlers:
 
     @pytest.mark.asyncio
     async def test_callback_approve_not_admin(self, mock_callback):
-        with patch("handlers.ADMIN_ID", 999999):
+        with patch("handlers.settings.admin_id", 999999):
             from handlers import callback_approve
 
             mock_callback.from_user.id = 123456
@@ -454,7 +508,7 @@ class TestHandlers:
     async def test_callback_reject_success(self, mock_callback):
         mock_db = AsyncMock()
 
-        with patch("handlers.ADMIN_ID", 123456):
+        with patch("handlers.settings.admin_id", 123456):
             with patch(
                 "handlers.get_db", return_value=make_async_context_manager(mock_db)
             ):
@@ -474,7 +528,7 @@ class TestHandlers:
 
     @pytest.mark.asyncio
     async def test_callback_reject_not_admin(self, mock_callback):
-        with patch("handlers.ADMIN_ID", 999999):
+        with patch("handlers.settings.admin_id", 999999):
             from handlers import callback_reject
 
             mock_callback.from_user.id = 123456
@@ -525,7 +579,7 @@ class TestHandlers:
 
     @pytest.mark.asyncio
     async def test_cmd_users_not_admin(self, mock_message):
-        with patch("handlers.ADMIN_ID", 999999):
+        with patch("handlers.settings.admin_id", 999999):
             from handlers import cmd_users
 
             mock_message.from_user.id = 123456
@@ -539,7 +593,7 @@ class TestHandlers:
     async def test_cmd_users_empty(self, mock_message):
         mock_db = AsyncMock()
 
-        with patch("handlers.ADMIN_ID", 123456):
+        with patch("handlers.settings.admin_id", 123456):
             with patch(
                 "handlers.get_db", return_value=make_async_context_manager(mock_db)
             ):
@@ -592,7 +646,7 @@ class TestGetUserDisplayName:
 class TestCheckAccess:
     @pytest.mark.asyncio
     async def test_check_access_admin(self):
-        with patch("handlers.ADMIN_ID", 123456):
+        with patch("handlers.settings.admin_id", 123456):
             from handlers import check_access
 
             result = await check_access(123456)
@@ -602,7 +656,7 @@ class TestCheckAccess:
     async def test_check_access_allowed_user(self):
         mock_db = AsyncMock()
 
-        with patch("handlers.ADMIN_ID", 999999):
+        with patch("handlers.settings.admin_id", 999999):
             with patch(
                 "handlers.get_db", return_value=make_async_context_manager(mock_db)
             ):
@@ -616,7 +670,7 @@ class TestCheckAccess:
     async def test_check_access_not_allowed(self):
         mock_db = AsyncMock()
 
-        with patch("handlers.ADMIN_ID", 999999):
+        with patch("handlers.settings.admin_id", 999999):
             with patch(
                 "handlers.get_db", return_value=make_async_context_manager(mock_db)
             ):
@@ -654,7 +708,7 @@ class TestCombineQuantitiesIntegration:
     @pytest.mark.asyncio
     async def test_cmd_add_combine_kg_and_grams(self, mock_message, mock_state):
         mock_db = AsyncMock()
-        existing_item = {"id": 1, "name": "сыр", "quantity": "1кг"}
+        existing_item = make_item(id=1, name="сыр", quantity="1кг")
 
         with patch("handlers.check_access", return_value=True):
             with patch(
@@ -677,7 +731,7 @@ class TestCombineQuantitiesIntegration:
     @pytest.mark.asyncio
     async def test_cmd_add_combine_liters_and_ml(self, mock_message, mock_state):
         mock_db = AsyncMock()
-        existing_item = {"id": 1, "name": "молоко", "quantity": "1л"}
+        existing_item = make_item(id=1, name="молоко", quantity="1л")
 
         with patch("handlers.check_access", return_value=True):
             with patch(
@@ -700,7 +754,7 @@ class TestCombineQuantitiesIntegration:
     @pytest.mark.asyncio
     async def test_cmd_add_combine_pieces_none(self, mock_message, mock_state):
         mock_db = AsyncMock()
-        existing_item = {"id": 1, "name": "хлеб", "quantity": None}
+        existing_item = make_item(id=1, name="хлеб", quantity=None)
 
         with patch("handlers.check_access", return_value=True):
             with patch(
@@ -746,7 +800,7 @@ class TestCombineQuantitiesIntegration:
     @pytest.mark.asyncio
     async def test_cmd_add_case_insensitive_cyrillic(self, mock_message, mock_state):
         mock_db = AsyncMock()
-        existing_item = {"id": 1, "name": "Сыр", "quantity": "1кг"}
+        existing_item = make_item(id=1, name="Сыр", quantity="1кг")
 
         with patch("handlers.check_access", return_value=True):
             with patch(
@@ -769,7 +823,7 @@ class TestCombineQuantitiesIntegration:
     @pytest.mark.asyncio
     async def test_cmd_add_combine_grams_under_1000(self, mock_message, mock_state):
         mock_db = AsyncMock()
-        existing_item = {"id": 1, "name": "сыр", "quantity": "200г"}
+        existing_item = make_item(id=1, name="сыр", quantity="200г")
 
         with patch("handlers.check_access", return_value=True):
             with patch(
@@ -828,7 +882,7 @@ class TestEditProduct:
     @pytest.mark.asyncio
     async def test_callback_edit(self, mock_callback):
         mock_db = AsyncMock()
-        item = {"id": 1, "name": "молоко", "quantity": "2л"}
+        item = make_item(id=1, name="молоко", quantity="2л")
 
         with patch("handlers.check_access", return_value=True):
             with patch(
@@ -969,10 +1023,14 @@ class TestTemplates:
     @pytest.mark.asyncio
     async def test_callback_view_template(self, mock_callback, mock_state):
         mock_db = AsyncMock()
-        template = {"id": 1, "name": "Тестовый"}
+        template = make_template(id=1, name="Тестовый")
         items = [
-            {"id": 1, "name": "молоко", "quantity": "2л", "category": "dairy"},
-            {"id": 2, "name": "хлеб", "quantity": None, "category": "bakery"},
+            make_template_item(
+                id=1, template_id=1, name="молоко", quantity="2л", category="dairy"
+            ),
+            make_template_item(
+                id=2, template_id=1, name="хлеб", quantity=None, category="bakery"
+            ),
         ]
 
         with patch("handlers.check_access", return_value=True):
@@ -1063,8 +1121,8 @@ class TestTemplates:
     ):
         mock_db = AsyncMock()
         template = {"id": 1, "name": "Тестовый"}
-        template_items = [{"id": 1, "name": "молоко", "quantity": "2л"}]
-        list_items = [{"id": 1, "name": "хлеб", "quantity": None}]
+        template_items = [make_item(id=1, name="молоко", quantity="2л")]
+        list_items = [make_item(id=1, name="хлеб", quantity=None)]
         mock_state.get_data = AsyncMock(return_value={"current_template_id": 1})
 
         with patch("handlers.check_access", return_value=True):
@@ -1093,8 +1151,8 @@ class TestTemplates:
     ):
         mock_db = AsyncMock()
         template = {"id": 1, "name": "Тестовый"}
-        template_items = [{"id": 1, "name": "молоко", "quantity": "2л"}]
-        list_items = [{"id": 1, "name": "молоко", "quantity": "1л"}]
+        template_items = [make_item(id=1, name="молоко", quantity="2л")]
+        list_items = [make_item(id=1, name="молоко", quantity="1л")]
         mock_state.get_data = AsyncMock(return_value={"current_template_id": 1})
 
         with patch("handlers.check_access", return_value=True):
@@ -1123,8 +1181,8 @@ class TestTemplates:
             return_value={
                 "conflicts": [
                     {
-                        "template_item": {"id": 1, "name": "молоко", "quantity": "2л"},
-                        "list_item": {"id": 1, "name": "молоко", "quantity": "1л"},
+                        "template_item": make_item(id=1, name="молоко", quantity="2л"),
+                        "list_item": make_item(id=1, name="молоко", quantity="1л"),
                     }
                 ],
                 "non_conflicts": [],
@@ -1152,8 +1210,8 @@ class TestTemplates:
             return_value={
                 "conflicts": [
                     {
-                        "template_item": {"id": 1, "name": "молоко", "quantity": "2л"},
-                        "list_item": {"id": 1, "name": "молоко", "quantity": "1л"},
+                        "template_item": make_item(id=1, name="молоко", quantity="2л"),
+                        "list_item": make_item(id=1, name="молоко", quantity="1л"),
                     }
                 ],
                 "non_conflicts": [],
@@ -1563,9 +1621,11 @@ class TestBuildTemplates:
     @pytest.mark.asyncio
     async def test_build_template_detail_message(self):
         mock_db = AsyncMock()
-        template = {"id": 1, "name": "Тестовый"}
+        template = make_template(id=1, name="Тестовый")
         items = [
-            {"id": 1, "name": "молоко", "quantity": "2л", "category": "dairy"},
+            make_template_item(
+                id=1, template_id=1, name="молоко", quantity="2л", category="dairy"
+            ),
         ]
 
         with patch("handlers.get_template_by_id", return_value=template):

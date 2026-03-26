@@ -44,6 +44,7 @@ from database import (
     update_template_item,
     create_template_from_items,
 )
+from models import Item
 
 
 class TestUsers:
@@ -60,9 +61,9 @@ class TestUsers:
         user = await get_user_by_telegram_id(db, regular_user["telegram_id"])
 
         assert user is not None
-        assert user["telegram_id"] == regular_user["telegram_id"]
-        assert user["username"] == regular_user["username"]
-        assert user["full_name"] == regular_user["full_name"]
+        assert user.telegram_id == regular_user["telegram_id"]
+        assert user.username == regular_user["username"]
+        assert user.full_name == regular_user["full_name"]
 
     @pytest.mark.asyncio
     async def test_get_user_by_telegram_id_not_found(self, db):
@@ -82,7 +83,7 @@ class TestUsers:
         user = await get_user_by_username(db, regular_user["username"])
 
         assert user is not None
-        assert user["telegram_id"] == regular_user["telegram_id"]
+        assert user.telegram_id == regular_user["telegram_id"]
 
     @pytest.mark.asyncio
     async def test_get_user_by_username_with_at(self, db, regular_user):
@@ -181,8 +182,8 @@ class TestUsers:
         await add_user(db, regular_user["telegram_id"], "new_username", "New Name", 456)
 
         user = await get_user_by_telegram_id(db, regular_user["telegram_id"])
-        assert user["username"] == "new_username"
-        assert user["full_name"] == "New Name"
+        assert user.username == "new_username"
+        assert user.full_name == "New Name"
 
 
 class TestItems:
@@ -219,7 +220,7 @@ class TestItems:
         items = await get_pending_items(db)
 
         assert len(items) == 1
-        assert items[0]["name"] == "молоко"
+        assert items[0].name == "молоко"
 
     @pytest.mark.asyncio
     async def test_get_purchased_items(self, db, regular_user):
@@ -233,7 +234,7 @@ class TestItems:
         items = await get_purchased_items(db)
 
         assert len(items) == 1
-        assert items[0]["name"] == "молоко"
+        assert items[0].name == "молоко"
 
     @pytest.mark.asyncio
     async def test_get_item_by_id(self, db, regular_user):
@@ -244,8 +245,8 @@ class TestItems:
         item = await get_item_by_id(db, item_id)
 
         assert item is not None
-        assert item["name"] == "молоко"
-        assert item["quantity"] == "2л"
+        assert item.name == "молоко"
+        assert item.quantity == "2л"
 
     @pytest.mark.asyncio
     async def test_get_item_by_id_not_found(self, db):
@@ -265,8 +266,8 @@ class TestItems:
         assert success is True
 
         item = await get_item_by_id(db, item_id)
-        assert item["is_purchased"] == 1
-        assert item["purchased_by"] == regular_user["telegram_id"]
+        assert item.is_purchased == 1
+        assert item.purchased_by == regular_user["telegram_id"]
 
     @pytest.mark.asyncio
     async def test_mark_as_purchased_already_purchased(self, db, regular_user):
@@ -297,7 +298,7 @@ class TestItems:
         assert success is True
 
         item = await get_item_by_id(db, item_id)
-        assert item["is_purchased"] == 0
+        assert item.is_purchased == 0
 
     @pytest.mark.asyncio
     async def test_unmark_purchased_not_purchased(self, db, regular_user):
@@ -342,7 +343,7 @@ class TestItems:
 
         items = await get_all_items(db)
         assert len(items) == 1
-        assert items[0]["name"] == "яйца"
+        assert items[0].name == "яйца"
 
     @pytest.mark.asyncio
     async def test_clear_purchased_items_empty(self, db):
@@ -356,8 +357,8 @@ class TestItems:
         item = await find_pending_item_by_name(db, "хлеб", None)
 
         assert item is not None
-        assert item["name"] == "хлеб"
-        assert item["quantity"] is None
+        assert item.name == "хлеб"
+        assert item.quantity is None
 
     @pytest.mark.asyncio
     async def test_find_pending_item_by_name_not_found(self, db):
@@ -371,8 +372,8 @@ class TestItems:
         item = await find_pending_item_by_name_and_unit(db, "сыр", "кг")
 
         assert item is not None
-        assert item["name"] == "сыр"
-        assert item["quantity"] == "1кг"
+        assert item.name == "сыр"
+        assert item.quantity == "1кг"
 
     @pytest.mark.asyncio
     async def test_find_pending_item_by_name_and_unit_not_found(self, db):
@@ -427,7 +428,7 @@ class TestItems:
         assert success is True
 
         item = await get_item_by_id(db, item_id)
-        assert item["quantity"] == "5л"
+        assert item.quantity == "5л"
 
     @pytest.mark.asyncio
     async def test_update_item_quantity_not_found(self, db):
@@ -445,12 +446,12 @@ class TestItems:
         items = await get_all_items_ordered(db)
 
         assert len(items) == 3
-        assert items[0]["name"] == "хлеб"
-        assert items[1]["name"] == "яйца"
-        assert items[2]["name"] == "молоко"
-        assert items[0]["is_purchased"] == 0
-        assert items[1]["is_purchased"] == 0
-        assert items[2]["is_purchased"] == 1
+        assert items[0].name == "хлеб"
+        assert items[1].name == "яйца"
+        assert items[2].name == "молоко"
+        assert items[0].is_purchased == 0
+        assert items[1].is_purchased == 0
+        assert items[2].is_purchased == 1
 
     @pytest.mark.asyncio
     async def test_find_pending_item_in_unit_group_weight_kg(self, db, regular_user):
@@ -459,8 +460,8 @@ class TestItems:
         item = await find_pending_item_in_unit_group(db, "сыр", "weight")
 
         assert item is not None
-        assert item["name"] == "сыр"
-        assert item["quantity"] == "1кг"
+        assert item.name == "сыр"
+        assert item.quantity == "1кг"
 
     @pytest.mark.asyncio
     async def test_find_pending_item_in_unit_group_weight_grams(self, db, regular_user):
@@ -469,7 +470,7 @@ class TestItems:
         item = await find_pending_item_in_unit_group(db, "сыр", "weight")
 
         assert item is not None
-        assert item["name"] == "сыр"
+        assert item.name == "сыр"
 
     @pytest.mark.asyncio
     async def test_find_pending_item_in_unit_group_volume(self, db, regular_user):
@@ -478,7 +479,7 @@ class TestItems:
         item = await find_pending_item_in_unit_group(db, "молоко", "volume")
 
         assert item is not None
-        assert item["name"] == "молоко"
+        assert item.name == "молоко"
 
     @pytest.mark.asyncio
     async def test_find_pending_item_in_unit_group_pieces(self, db, regular_user):
@@ -487,7 +488,7 @@ class TestItems:
         item = await find_pending_item_in_unit_group(db, "хлеб", "pieces")
 
         assert item is not None
-        assert item["name"] == "хлеб"
+        assert item.name == "хлеб"
 
     @pytest.mark.asyncio
     async def test_find_pending_item_in_unit_group_without_unit(self, db, regular_user):
@@ -496,8 +497,8 @@ class TestItems:
         item = await find_pending_item_in_unit_group(db, "хлеб", "pieces")
 
         assert item is not None
-        assert item["name"] == "хлеб"
-        assert item["quantity"] is None
+        assert item.name == "хлеб"
+        assert item.quantity is None
 
     @pytest.mark.asyncio
     async def test_find_pending_item_in_unit_group_not_found_different_group(
@@ -552,7 +553,7 @@ class TestPendingUsers:
         user = await get_user_by_telegram_id(db, regular_user["telegram_id"])
 
         assert user is not None
-        assert user["is_approved"] == 0
+        assert user.is_approved == 0
 
     @pytest.mark.asyncio
     async def test_approve_user(self, db, regular_user):
@@ -568,7 +569,7 @@ class TestPendingUsers:
         assert success is True
 
         user = await get_user_by_telegram_id(db, regular_user["telegram_id"])
-        assert user["is_approved"] == 1
+        assert user.is_approved == 1
 
     @pytest.mark.asyncio
     async def test_approve_user_not_found(self, db):
@@ -626,7 +627,7 @@ class TestPendingUsers:
         pending = await get_pending_users(db)
 
         assert len(pending) == 1
-        assert pending[0]["telegram_id"] == regular_user["telegram_id"]
+        assert pending[0].telegram_id == regular_user["telegram_id"]
 
     @pytest.mark.asyncio
     async def test_get_pending_users_empty(self, db):
@@ -701,7 +702,7 @@ class TestPendingUsers:
         user = await get_user_by_username_all(db, regular_user["username"])
 
         assert user is not None
-        assert user["is_approved"] == 0
+        assert user.is_approved == 0
 
     @pytest.mark.asyncio
     async def test_get_user_by_username_only_approved(self, db, regular_user):
@@ -736,7 +737,7 @@ class TestPendingUsers:
         users = await get_all_users(db)
 
         assert len(users) == 1
-        assert users[0]["telegram_id"] == admin_user["telegram_id"]
+        assert users[0].telegram_id == admin_user["telegram_id"]
 
 
 class TestTemplates:
@@ -767,7 +768,7 @@ class TestTemplates:
         template = await get_template_by_id(db, template_id)
 
         assert template is not None
-        assert template["name"] == "Тестовый"
+        assert template.name == "Тестовый"
 
     @pytest.mark.asyncio
     async def test_get_template_by_id_not_found(self, db):
@@ -781,7 +782,7 @@ class TestTemplates:
         template = await get_template_by_name(db, "Название")
 
         assert template is not None
-        assert template["name"] == "Название"
+        assert template.name == "Название"
 
     @pytest.mark.asyncio
     async def test_get_template_by_name_case_insensitive(self, db):
@@ -814,7 +815,7 @@ class TestTemplates:
 
         assert success is True
         template = await get_template_by_id(db, template_id)
-        assert template["name"] == "Новое название"
+        assert template.name == "Новое название"
 
     @pytest.mark.asyncio
     async def test_rename_template_duplicate(self, db):
@@ -861,8 +862,8 @@ class TestTemplateItems:
         item = await get_template_item_by_id(db, item_id)
 
         assert item is not None
-        assert item["name"] == "сыр"
-        assert item["quantity"] == "500г"
+        assert item.name == "сыр"
+        assert item.quantity == "500г"
 
     @pytest.mark.asyncio
     async def test_get_template_item_by_id_not_found(self, db):
@@ -894,7 +895,7 @@ class TestTemplateItems:
 
         assert success is True
         item = await get_template_item_by_id(db, item_id)
-        assert item["quantity"] == "3л"
+        assert item.quantity == "3л"
 
     @pytest.mark.asyncio
     async def test_update_template_item_not_found(self, db):
@@ -904,9 +905,9 @@ class TestTemplateItems:
     @pytest.mark.asyncio
     async def test_create_template_from_items(self, db):
         items = [
-            {"name": "молоко", "quantity": "2л"},
-            {"name": "хлеб", "quantity": None},
-            {"name": "сыр", "quantity": "500г"},
+            Item(id=0, name="молоко", quantity="2л", added_by=1),
+            Item(id=0, name="хлеб", quantity=None, added_by=1),
+            Item(id=0, name="сыр", quantity="500г", added_by=1),
         ]
 
         template_id = await create_template_from_items(db, "Из списка", items)
@@ -924,4 +925,4 @@ class TestTemplateItems:
         templates = await get_all_templates(db)
 
         assert len(templates) == 1
-        assert templates[0]["item_count"] == 2
+        assert templates[0].item_count == 2

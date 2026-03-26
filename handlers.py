@@ -8,7 +8,7 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 
-from config import ADMIN_ID
+from config import settings
 from database import (
     get_db,
     add_user,
@@ -184,7 +184,7 @@ def get_template_manage_keyboard() -> ReplyKeyboardMarkup:
 
 
 async def check_access(user_id: int) -> bool:
-    if user_id == ADMIN_ID:
+    if user_id == settings.admin_id:
         return True
     async with get_db() as db:
         return await is_user_allowed(db, user_id)
@@ -203,46 +203,46 @@ async def build_list_message(db) -> tuple:
     counter = 0
 
     for item in items:
-        if item["is_purchased"]:
+        if item.is_purchased:
             continue
 
         counter += 1
-        item_category = item.get("category", "other")
+        item_category = item.category
 
         if item_category != current_category:
             text += f"\n{get_category_name(item_category)}\n"
             current_category = item_category
 
-        item_text = format_item(item["name"], item["quantity"])
-        adder = item["added_by_name"] or "Неизвестно"
+        item_text = format_item(item.name, item.quantity)
+        adder = item.added_by_name or "Неизвестно"
         text += f"{counter}. {item_text} (добавил: {adder})\n"
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=f"✅ {counter}", callback_data=f"purchase_{item['id']}"
+                    text=f"✅ {counter}", callback_data=f"purchase_{item.id}"
                 ),
                 InlineKeyboardButton(
-                    text=f"✏️ {counter}", callback_data=f"edit_{item['id']}"
+                    text=f"✏️ {counter}", callback_data=f"edit_{item.id}"
                 ),
                 InlineKeyboardButton(
-                    text=f"🗑 {counter}", callback_data=f"remove_{item['id']}"
+                    text=f"🗑 {counter}", callback_data=f"remove_{item.id}"
                 ),
             ]
         )
 
-    purchased_items = [item for item in items if item["is_purchased"]]
+    purchased_items = [item for item in items if item.is_purchased]
     for item in purchased_items:
         counter += 1
-        item_text = format_item(item["name"], item["quantity"])
-        purchaser = item["purchased_by_name"] or "Неизвестно"
+        item_text = format_item(item.name, item.quantity)
+        purchaser = item.purchased_by_name or "Неизвестно"
         text += f"\n✅ {counter}. {item_text} (купил: {purchaser})\n"
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=f"↩️ {counter}", callback_data=f"undo_{item['id']}"
+                    text=f"↩️ {counter}", callback_data=f"undo_{item.id}"
                 ),
                 InlineKeyboardButton(
-                    text=f"🗑 {counter}", callback_data=f"remove_{item['id']}"
+                    text=f"🗑 {counter}", callback_data=f"remove_{item.id}"
                 ),
             ]
         )
@@ -262,15 +262,15 @@ async def build_pending_message(db) -> tuple:
     keyboard = []
 
     for i, u in enumerate(users, 1):
-        display = f"@{u['username']}" if u["username"] else u["full_name"]
+        display = f"@{u.username}" if u.username else u.full_name
         text += f"{i}. {display}\n"
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=f"✅ {i}", callback_data=f"approve_{u['telegram_id']}"
+                    text=f"✅ {i}", callback_data=f"approve_{u.telegram_id}"
                 ),
                 InlineKeyboardButton(
-                    text=f"❌ {i}", callback_data=f"reject_{u['telegram_id']}"
+                    text=f"❌ {i}", callback_data=f"reject_{u.telegram_id}"
                 ),
             ]
         )
@@ -285,14 +285,14 @@ async def cmd_start(message: types.Message):
     user = message.from_user
     user_display = get_user_display_name(user)
 
-    if user.id == ADMIN_ID:
+    if user.id == settings.admin_id:
         async with get_db() as db:
             existing = await get_user_by_telegram_id(db, user.id)
             if not existing:
                 await add_user(
                     db, user.id, user.username, user.full_name, user.id, approved=True
                 )
-            elif not existing.get("is_approved"):
+            elif not existing.is_approved:
                 await approve_user(db, user.id)
 
         await message.answer(
@@ -318,7 +318,7 @@ async def cmd_start(message: types.Message):
         existing = await get_user_by_telegram_id(db, user.id)
 
         if existing:
-            if existing.get("is_approved"):
+            if existing.is_approved:
                 await message.answer(
                     f"👋 Привет, {user_display}!\n\n"
                     "📋 Доступные команды:\n"
@@ -482,9 +482,9 @@ async def save_product(message: types.Message, state: FSMContext, amount, unit):
             existing = await find_pending_item_in_unit_group(db, name, "pieces")
 
         if existing:
-            new_quantity = combine_quantities(existing["quantity"], quantity)
+            new_quantity = combine_quantities(existing.quantity, quantity)
             if new_quantity:
-                await update_item_quantity(db, existing["id"], new_quantity)
+                await update_item_quantity(db, existing.id, new_quantity)
                 text, keyboard = await build_list_message(db)
                 await state.clear()
                 if list_message_id:
@@ -575,9 +575,9 @@ async def cmd_add(message: types.Message, state: FSMContext):
             existing = await find_pending_item_in_unit_group(db, name, "pieces")
 
         if existing:
-            new_quantity = combine_quantities(existing["quantity"], quantity)
+            new_quantity = combine_quantities(existing.quantity, quantity)
             if new_quantity:
-                await update_item_quantity(db, existing["id"], new_quantity)
+                await update_item_quantity(db, existing.id, new_quantity)
                 return
 
         await add_item(db, name, quantity, user.id, user_display)
@@ -657,23 +657,17 @@ async def callback_add_template_to_list(
     non_conflicts = []
 
     for t_item in template_items:
-        t_unit = (
-            extract_quantity_parts(t_item["quantity"])[1]
-            if t_item["quantity"]
-            else None
-        )
+        t_unit = extract_quantity_parts(t_item.quantity)[1] if t_item.quantity else None
         t_group = get_unit_group(t_unit)
 
         conflict_found = False
         for l_item in list_items:
             l_unit = (
-                extract_quantity_parts(l_item["quantity"])[1]
-                if l_item["quantity"]
-                else None
+                extract_quantity_parts(l_item.quantity)[1] if l_item.quantity else None
             )
             l_group = get_unit_group(l_unit)
 
-            if l_item["name"].lower() == t_item["name"].lower() and l_group == t_group:
+            if l_item.name.lower() == t_item.name.lower() and l_group == t_group:
                 conflicts.append(
                     {
                         "template_item": t_item,
@@ -692,15 +686,15 @@ async def callback_add_template_to_list(
             for item in non_conflicts:
                 await add_item(
                     db,
-                    item["name"],
-                    item.get("quantity"),
+                    item.name,
+                    item.quantity,
                     user.id,
                     user_display,
-                    item.get("category", "other"),
+                    item.category,
                 )
 
         await callback.message.edit_text(
-            f"✅ Добавлено {len(non_conflicts)} товаров из шаблона '{template['name']}'."
+            f"✅ Добавлено {len(non_conflicts)} товаров из шаблона '{template.name}'."
         )
         await callback.answer()
         return
@@ -709,10 +703,10 @@ async def callback_add_template_to_list(
     for i, conflict in enumerate(conflicts, 1):
         t_item = conflict["template_item"]
         l_item = conflict["list_item"]
-        t_text = format_item(t_item["name"], t_item["quantity"])
-        l_text = format_item(l_item["name"], l_item["quantity"])
+        t_text = format_item(t_item.name, t_item.quantity)
+        l_text = format_item(l_item.name, l_item.quantity)
 
-        text += f"{i}. {t_item['name']}\n"
+        text += f"{i}. {t_item.name}\n"
         text += f"   В списке: {l_text}\n"
         text += f"   В шаблоне: {t_text}\n\n"
 
@@ -803,10 +797,10 @@ async def cmd_done(message: types.Message):
             return
 
         item = items[number - 1]
-        success = await mark_as_purchased(db, item["id"], user.id, user_display)
+        success = await mark_as_purchased(db, item.id, user.id, user_display)
 
     if success:
-        item_text = format_item(item["name"], item["quantity"])
+        item_text = format_item(item.name, item.quantity)
         await message.answer(f"✅ Куплено: {item_text}")
     else:
         await message.answer("❌ Не удалось отметить продукт как купленный.")
@@ -845,10 +839,10 @@ async def cmd_undo(message: types.Message):
             return
 
         item = items[number - 1]
-        success = await unmark_purchased(db, item["id"])
+        success = await unmark_purchased(db, item.id)
 
     if success:
-        item_text = format_item(item["name"], item["quantity"])
+        item_text = format_item(item.name, item.quantity)
         await message.answer(f"↩️ Возвращено в список: {item_text}")
     else:
         await message.answer("❌ Не удалось вернуть продукт в список.")
@@ -887,10 +881,10 @@ async def cmd_remove(message: types.Message):
             return
 
         item = items[number - 1]
-        success = await remove_item(db, item["id"])
+        success = await remove_item(db, item.id)
 
     if success:
-        item_text = format_item(item["name"], item["quantity"])
+        item_text = format_item(item.name, item.quantity)
         await message.answer(f"🗑 Удалено: {item_text}")
     else:
         await message.answer("❌ Не удалось удалить продукт.")
@@ -929,7 +923,7 @@ async def cmd_clear(message: types.Message, state: FSMContext):
 async def cmd_allow(message: types.Message):
     user = message.from_user
 
-    if user.id != ADMIN_ID:
+    if user.id != settings.admin_id:
         await message.answer("⛔ Только администратор может добавлять пользователей.")
         return
 
@@ -938,7 +932,7 @@ async def cmd_allow(message: types.Message):
         async with get_db() as db:
             existing = await get_user_by_telegram_id(db, replied_user.id)
             if existing:
-                if existing.get("is_approved"):
+                if existing.is_approved:
                     target_display = get_user_display_name(replied_user)
                     await message.answer(
                         f"✅ Пользователь {target_display} уже имеет доступ."
@@ -991,15 +985,15 @@ async def cmd_allow(message: types.Message):
             await message.answer(f"❌ Пользователь @{username} не найден.")
             return
 
-        if target_user.get("is_approved"):
+        if target_user.is_approved:
             await message.answer(f"✅ Пользователь @{username} уже имеет доступ.")
             return
 
-        await approve_user(db, target_user["telegram_id"])
+        await approve_user(db, target_user.telegram_id)
 
     try:
         await message.bot.send_message(
-            target_user["telegram_id"],
+            target_user.telegram_id,
             "✅ Вам разрешён доступ к боту!\n\nНапишите /start чтобы начать.",
         )
     except:
@@ -1012,7 +1006,7 @@ async def cmd_allow(message: types.Message):
 async def cmd_pending(message: types.Message):
     user = message.from_user
 
-    if user.id != ADMIN_ID:
+    if user.id != settings.admin_id:
         await message.answer("⛔ Только администратор может просматривать ожидающих.")
         return
 
@@ -1029,7 +1023,7 @@ async def cmd_pending(message: types.Message):
 async def cmd_deny(message: types.Message):
     user = message.from_user
 
-    if user.id != ADMIN_ID:
+    if user.id != settings.admin_id:
         await message.answer("⛔ Только администратор может удалять пользователей.")
         return
 
@@ -1051,7 +1045,7 @@ async def cmd_deny(message: types.Message):
             await message.answer(f"❌ Пользователь @{username} не найден.")
             return
 
-        success = await remove_user(db, target_user["telegram_id"])
+        success = await remove_user(db, target_user.telegram_id)
 
     if success:
         await message.answer(f"✅ Пользователь @{username} удалён.")
@@ -1063,7 +1057,7 @@ async def cmd_deny(message: types.Message):
 async def cmd_users(message: types.Message):
     user = message.from_user
 
-    if user.id != ADMIN_ID:
+    if user.id != settings.admin_id:
         await message.answer(
             "⛔ Только администратор может просматривать список пользователей."
         )
@@ -1079,8 +1073,8 @@ async def cmd_users(message: types.Message):
     text = "📋 Пользователи с доступом:\n\n"
 
     for u in users:
-        display = f"@{u['username']}" if u["username"] else u["full_name"]
-        is_admin = "👑" if u["telegram_id"] == ADMIN_ID else "👤"
+        display = f"@{u.username}" if u.username else u.full_name
+        is_admin = "👑" if u.telegram_id == settings.admin_id else "👤"
         text += f"{is_admin} {display}\n"
 
     await message.answer(text)
@@ -1103,10 +1097,10 @@ async def callback_set_category(callback: types.CallbackQuery):
             return
 
         await update_item_category(db, item_id, category)
-        await save_product_category(db, item["name"], category)
+        await save_product_category(db, item.name, category)
 
         cat_keyboard = build_category_keyboard(item_id, category, "cat")
-        item_text = format_item(item["name"], item["quantity"])
+        item_text = format_item(item.name, item.quantity)
         try:
             await callback.message.edit_text(
                 f"✅ Добавлено: {item_text}\n📁 {get_category_name(category)}",
@@ -1134,10 +1128,10 @@ async def callback_set_template_category(callback: types.CallbackQuery):
             return
 
         await update_template_item_category(db, item_id, category)
-        await save_product_category(db, item["name"], category)
+        await save_product_category(db, item.name, category)
 
         cat_keyboard = build_category_keyboard(item_id, category, "tcat")
-        item_text = format_item(item["name"], item["quantity"])
+        item_text = format_item(item.name, item.quantity)
         try:
             await callback.message.edit_text(
                 f"✅ Добавлено: {item_text}\n📁 {get_category_name(category)}",
@@ -1225,7 +1219,7 @@ async def callback_remove(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("approve_"))
 async def callback_approve(callback: types.CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id != settings.admin_id:
         await callback.answer(
             "⛔ Только администратор может одобрять.", show_alert=True
         )
@@ -1265,7 +1259,7 @@ async def callback_approve(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("reject_"))
 async def callback_reject(callback: types.CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id != settings.admin_id:
         await callback.answer(
             "⛔ Только администратор может отклонять.", show_alert=True
         )
@@ -1305,10 +1299,10 @@ async def callback_edit(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("❌ Продукт не найден", show_alert=True)
         return
 
-    await state.update_data(edit_item_id=item_id, edit_item_name=item["name"])
+    await state.update_data(edit_item_id=item_id, edit_item_name=item.name)
     await state.set_state(EditProductStates.waiting_for_unit)
     await callback.message.answer(
-        f"Редактирование: {item['name']}\n\nВыберите единицу измерения:",
+        f"Редактирование: {item.name}\n\nВыберите единицу измерения:",
         reply_markup=get_unit_keyboard(),
     )
     await callback.answer()
@@ -1452,33 +1446,33 @@ async def build_template_detail_message(db, template_id: int) -> tuple:
     items = await get_template_items_ordered(db, template_id)
 
     if not items:
-        text = f"📋 Шаблон: {template['name']}\n\nШаблон пуст."
+        text = f"📋 Шаблон: {template.name}\n\nШаблон пуст."
         keyboard = []
     else:
-        text = f"📋 Шаблон: {template['name']}\n"
+        text = f"📋 Шаблон: {template.name}\n"
         keyboard = []
         current_category = None
         counter = 0
 
         for item in items:
             counter += 1
-            item_category = item.get("category", "other")
+            item_category = item.category
 
             if item_category != current_category:
                 text += f"\n{get_category_name(item_category)}\n"
                 current_category = item_category
 
-            item_text = format_item(item["name"], item["quantity"])
+            item_text = format_item(item.name, item.quantity)
             text += f"{counter}. {item_text}\n"
             keyboard.append(
                 [
                     InlineKeyboardButton(
                         text=f"✏️ {counter}",
-                        callback_data=f"edit_template_item_{item['id']}",
+                        callback_data=f"edit_template_item_{item.id}",
                     ),
                     InlineKeyboardButton(
                         text=f"🗑 {counter}",
-                        callback_data=f"del_template_item_{item['id']}",
+                        callback_data=f"del_template_item_{item.id}",
                     ),
                 ]
             )
@@ -1933,13 +1927,13 @@ async def btn_template_delete_item(message: types.Message, state: FSMContext):
     keyboard = []
 
     for i, item in enumerate(items, 1):
-        item_text = format_item(item["name"], item["quantity"])
+        item_text = format_item(item.name, item.quantity)
         text += f"{i}. {item_text}\n"
         keyboard.append(
             [
                 InlineKeyboardButton(
                     text=f"🗑 {i}. {item_text}",
-                    callback_data=f"del_template_item_{item['id']}",
+                    callback_data=f"del_template_item_{item.id}",
                 )
             ]
         )
@@ -2013,13 +2007,13 @@ async def btn_template_edit_item(message: types.Message, state: FSMContext):
     keyboard = []
 
     for i, item in enumerate(items, 1):
-        item_text = format_item(item["name"], item["quantity"])
+        item_text = format_item(item.name, item.quantity)
         text += f"{i}. {item_text}\n"
         keyboard.append(
             [
                 InlineKeyboardButton(
                     text=f"✏️ {i}. {item_text}",
-                    callback_data=f"edit_template_item_{item['id']}",
+                    callback_data=f"edit_template_item_{item.id}",
                 )
             ]
         )
@@ -2049,11 +2043,11 @@ async def callback_edit_template_item(callback: types.CallbackQuery, state: FSMC
         return
 
     await state.update_data(
-        edit_template_item_id=item_id, edit_template_item_name=item["name"]
+        edit_template_item_id=item_id, edit_template_item_name=item.name
     )
     await state.set_state(EditProductStates.waiting_for_unit)
     await callback.message.answer(
-        f"Редактирование: {item['name']}\n\nВыберите единицу измерения:",
+        f"Редактирование: {item.name}\n\nВыберите единицу измерения:",
         reply_markup=get_unit_keyboard(),
     )
     await callback.answer()
@@ -2114,23 +2108,17 @@ async def btn_template_add_to_list(message: types.Message, state: FSMContext):
     non_conflicts = []
 
     for t_item in template_items:
-        t_unit = (
-            extract_quantity_parts(t_item["quantity"])[1]
-            if t_item["quantity"]
-            else None
-        )
+        t_unit = extract_quantity_parts(t_item.quantity)[1] if t_item.quantity else None
         t_group = get_unit_group(t_unit)
 
         conflict_found = False
         for l_item in list_items:
             l_unit = (
-                extract_quantity_parts(l_item["quantity"])[1]
-                if l_item["quantity"]
-                else None
+                extract_quantity_parts(l_item.quantity)[1] if l_item.quantity else None
             )
             l_group = get_unit_group(l_unit)
 
-            if l_item["name"].lower() == t_item["name"].lower() and l_group == t_group:
+            if l_item.name.lower() == t_item.name.lower() and l_group == t_group:
                 conflicts.append(
                     {
                         "template_item": t_item,
@@ -2147,9 +2135,7 @@ async def btn_template_add_to_list(message: types.Message, state: FSMContext):
     if not conflicts:
         async with get_db() as db:
             for item in non_conflicts:
-                await add_item(
-                    db, item["name"], item.get("quantity"), user.id, user_display
-                )
+                await add_item(db, item.name, item.quantity, user.id, user_display)
 
         await state.clear()
         await message.answer(
@@ -2162,10 +2148,10 @@ async def btn_template_add_to_list(message: types.Message, state: FSMContext):
     for i, conflict in enumerate(conflicts, 1):
         t_item = conflict["template_item"]
         l_item = conflict["list_item"]
-        t_text = format_item(t_item["name"], t_item["quantity"])
-        l_text = format_item(l_item["name"], l_item["quantity"])
+        t_text = format_item(t_item.name, t_item.quantity)
+        l_text = format_item(l_item.name, l_item.quantity)
 
-        text += f"{i}. {t_item['name']}\n"
+        text += f"{i}. {t_item.name}\n"
         text += f"   В списке: {l_text}\n"
         text += f"   В шаблоне: {t_text}\n\n"
 
@@ -2212,17 +2198,17 @@ async def callback_replace_all_conflicts(
         for conflict in conflicts:
             await update_item_quantity(
                 db,
-                conflict["list_item"]["id"],
-                conflict["template_item"]["quantity"],
+                conflict["list_item"].id,
+                conflict["template_item"].quantity,
             )
         for item in non_conflicts:
             await add_item(
                 db,
-                item["name"],
-                item.get("quantity"),
+                item.name,
+                item.quantity,
                 callback.from_user.id,
                 user_display,
-                item.get("category", "other"),
+                item.category,
             )
 
     await state.clear()
@@ -2248,11 +2234,11 @@ async def callback_keep_all_conflicts(callback: types.CallbackQuery, state: FSMC
         for item in non_conflicts:
             await add_item(
                 db,
-                item["name"],
-                item.get("quantity"),
+                item.name,
+                item.quantity,
                 callback.from_user.id,
                 user_display,
-                item.get("category", "other"),
+                item.category,
             )
 
     await state.clear()

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher
 from aiogram.types import ErrorEvent
 
-from config import BOT_TOKEN, ADMIN_ID
+from config import settings
 from handlers import router
 from database import get_db, get_approved_telegram_ids
 
@@ -58,13 +58,13 @@ async def reminder_scheduler(bot: Bot):
 
 
 async def main():
-    if not BOT_TOKEN:
+    if not settings.bot_token:
         logging.error("BOT_TOKEN не указан в .env файле")
         return
 
-    logging.info(f"ADMIN_ID: {ADMIN_ID}")
+    logging.info(f"ADMIN_ID: {settings.admin_id}")
 
-    bot = Bot(token=BOT_TOKEN)
+    bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
 
     dp.error.register(errors_handler)
