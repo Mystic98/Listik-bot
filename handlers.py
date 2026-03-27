@@ -624,8 +624,8 @@ async def btn_add_template_to_list(message: types.Message, state: FSMContext):
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=f"📋 {t['name']} ({t['item_count']} товаров)",
-                    callback_data=f"add_template_{t['id']}",
+                    text=f"📋 {t.name} ({t.item_count} товаров)",
+                    callback_data=f"add_template_{t.id}",
                 )
             ]
         )
@@ -1415,11 +1415,11 @@ async def build_templates_message(db) -> tuple:
     keyboard = []
 
     for i, t in enumerate(templates, 1):
-        text += f"{i}. {t['name']} ({t['item_count']} товаров)\n"
+        text += f"{i}. {t.name} ({t.item_count} товаров)\n"
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=f"📋 {t['name']}", callback_data=f"view_template_{t['id']}"
+                    text=f"📋 {t.name}", callback_data=f"view_template_{t.id}"
                 ),
             ]
         )
@@ -1973,7 +1973,7 @@ async def callback_delete_template_item(
             await callback.message.edit_text(text)
     except:
         pass
-    await callback.answer(f"🗑 Удалено: {item['name'] if item else ''}")
+    await callback.answer(f"🗑 Удалено: {item.name if item else ''}")
 
 
 @router.callback_query(F.data == "cancel_delete_template_item")
@@ -2297,9 +2297,7 @@ async def btn_template_delete(message: types.Message, state: FSMContext):
         ]
     )
 
-    await message.answer(
-        f"⚠️ Удалить шаблон '{template['name']}'?", reply_markup=keyboard
-    )
+    await message.answer(f"⚠️ Удалить шаблон '{template.name}'?", reply_markup=keyboard)
 
 
 @router.callback_query(F.data.startswith("confirm_del_template_"))

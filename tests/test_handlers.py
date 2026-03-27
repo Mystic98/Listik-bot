@@ -992,8 +992,8 @@ class TestTemplates:
     async def test_btn_templates_with_templates(self, mock_message, mock_state):
         mock_db = AsyncMock()
         templates = [
-            {"id": 1, "name": "Недельный", "item_count": 5},
-            {"id": 2, "name": "Праздник", "item_count": 10},
+            make_template(id=1, name="Недельный", item_count=5),
+            make_template(id=2, name="Праздник", item_count=10),
         ]
 
         with patch("handlers.check_access", return_value=True):
@@ -1054,7 +1054,7 @@ class TestTemplates:
     @pytest.mark.asyncio
     async def test_btn_template_delete(self, mock_message, mock_state):
         mock_db = AsyncMock()
-        template = {"id": 1, "name": "Для удаления"}
+        template = make_template(id=1, name="Для удаления")
         mock_state.get_data = AsyncMock(return_value={"current_template_id": 1})
 
         with patch("handlers.check_access", return_value=True):
@@ -1607,7 +1607,7 @@ class TestBuildTemplates:
     async def test_build_templates_message_with_templates(self):
         mock_db = AsyncMock()
         templates = [
-            {"id": 1, "name": "Тестовый", "item_count": 3},
+            make_template(id=1, name="Тестовый", item_count=3),
         ]
 
         with patch("handlers.get_all_templates", return_value=templates):
