@@ -11,8 +11,4 @@ COPY bot.py config.py database.py handlers.py states.py utils.py categories.py m
 
 RUN mkdir -p /app/data /app/logs
 
-RUN useradd --create-home botuser
-RUN chown -R botuser:botuser /app
-USER botuser
-
 CMD ["uv", "run", "python", "bot.py"]
