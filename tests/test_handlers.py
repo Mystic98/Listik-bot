@@ -1760,7 +1760,7 @@ class TestRoomHandlers:
                         from handlers import btn_room
 
                         await btn_room(mock_message, mock_state)
-                        call_args = mock_message.answer.call_args[0][0]
+                        call_args = mock_message.answer.call_args_list[0][0][0]
                         assert "Ваши комнаты" in call_args
 
     @pytest.mark.asyncio
@@ -1836,12 +1836,16 @@ class TestRoomHandlers:
         with patch("handlers.get_db", return_value=make_async_context_manager(mock_db)):
             with patch("handlers.get_room_by_id", return_value=room):
                 with patch("handlers.is_room_member", return_value=True):
-                    with patch("handlers.set_active_room", new_callable=AsyncMock):
-                        from handlers import callback_select_room
+                    with patch("handlers.is_room_creator", return_value=True):
+                        with patch("handlers.set_active_room", new_callable=AsyncMock):
+                            from handlers import callback_select_room
 
-                        mock_callback.data = "select_room_1"
-                        await callback_select_room(mock_callback, mock_state)
-                        mock_state.update_data.assert_called()
+                            mock_callback.data = "select_room_1"
+                            await callback_select_room(mock_callback, mock_state)
+                            mock_state.update_data.assert_called()
+                            assert mock_callback.message.answer.call_count >= 1
+                            call_args = mock_callback.message.answer.call_args[0][0]
+                            assert "Управление комнатой" in call_args
 
     @pytest.mark.asyncio
     async def test_callback_select_room_not_found(self, mock_callback, mock_state):
@@ -1904,12 +1908,34 @@ class TestRoomHandlers:
         )
         with patch("handlers.get_db", return_value=make_async_context_manager(mock_db)):
             with patch("handlers.get_user_by_username", return_value=None):
-                from handlers import process_invite_username
+                with patch("handlers.get_user_by_username_all", return_value=None):
+                    from handlers import process_invite_username
 
-                mock_message.text = "nobody"
-                await process_invite_username(mock_message, mock_state)
-                call_args = mock_message.answer.call_args[0][0]
-                assert "не найден" in call_args
+                    mock_message.text = "nobody"
+                    await process_invite_username(mock_message, mock_state)
+                    call_args = mock_message.answer.call_args[0][0]
+                    assert "не найден" in call_args
+
+    @pytest.mark.asyncio
+    async def test_process_invite_username_not_approved(self, mock_message, mock_state):
+        mock_db = AsyncMock()
+        pending_user = make_user(
+            telegram_id=999888, username="invitee", is_approved=False
+        )
+        mock_state.get_data = AsyncMock(
+            return_value={"room_id": 1, "room_name": "Test"}
+        )
+        with patch("handlers.get_db", return_value=make_async_context_manager(mock_db)):
+            with patch("handlers.get_user_by_username", return_value=None):
+                with patch(
+                    "handlers.get_user_by_username_all", return_value=pending_user
+                ):
+                    from handlers import process_invite_username
+
+                    mock_message.text = "invitee"
+                    await process_invite_username(mock_message, mock_state)
+                    call_args = mock_message.answer.call_args[0][0]
+                    assert "не одобрен" in call_args
 
     @pytest.mark.asyncio
     async def test_process_invite_username_already_member(

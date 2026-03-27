@@ -146,14 +146,13 @@ def get_user_display_name(user: types.User) -> str:
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     keyboard = [
         [
-            KeyboardButton(text="➕ Добавить"),
             KeyboardButton(text="📋 Список"),
+            KeyboardButton(text="📋 Шаблоны"),
         ],
         [
-            KeyboardButton(text="📋 Шаблоны"),
             KeyboardButton(text="🏠 Комната"),
+            KeyboardButton(text="❓ Помощь"),
         ],
-        [KeyboardButton(text="❓ Помощь")],
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
@@ -398,17 +397,21 @@ async def cmd_start(message: types.Message):
         await message.answer(
             f"👋 Добро пожаловать, {user_display}!\n\n"
             "Вы администратор бота.\n\n"
-            "📋 Доступные команды:\n"
-            "/add <продукт> — добавить продукт\n"
-            "/list — показать список\n"
+            "📋 Кнопки меню:\n"
+            "📋 Список — показать список покупок\n"
+            "📋 Шаблоны — управление шаблонами\n"
+            "🏠 Комната — управление комнатой\n"
+            "❓ Помощь — эта справка\n\n"
+            "📝 Команды:\n"
+            "/add <продукт> — быстро добавить продукт\n"
             "/done <N> — отметить купленным\n"
             "/undo <N> — вернуть в список\n"
             "/remove <N> — удалить\n"
             "/clear — удалить все купленные\n\n"
             "👤 Администрирование:\n"
-            "/allow @username — добавить пользователя\n"
+            "/allow @username — одобрить пользователя\n"
             "/pending — список ожидающих подтверждения\n"
-            "/deny @username — удалить пользователя\n"
+            "/deny @username — отклонить пользователя\n"
             "/users — список пользователей",
             reply_markup=get_main_keyboard(),
         )
@@ -431,9 +434,13 @@ async def cmd_start(message: types.Message):
                     await message.answer(
                         f"👋 Привет, {user_display}!\n\n"
                         f"🏠 Активная комната: {room.name}\n\n"
-                        "📋 Доступные команды:\n"
-                        "/add <продукт> — добавить продукт\n"
-                        "/list — показать список\n"
+                        "📋 Кнопки меню:\n"
+                        "📋 Список — показать список покупок\n"
+                        "📋 Шаблоны — управление шаблонами\n"
+                        "🏠 Комната — управление комнатой\n"
+                        "❓ Помощь — эта справка\n\n"
+                        "📝 Команды:\n"
+                        "/add <продукт> — быстро добавить продукт\n"
                         "/done <N> — отметить купленным\n"
                         "/undo <N> — вернуть в список\n"
                         "/remove <N> — удалить\n"
@@ -2568,6 +2575,14 @@ async def btn_room(message: types.Message, state: FSMContext):
         "🏠 Ваши комнаты:", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
 
+    if active_room:
+        is_creator = active_room.creator_id == user_id
+        await state.update_data(room_id=active_room.id, room_name=active_room.name)
+        await message.answer(
+            f"🏠 Управление комнатой: {active_room.name}",
+            reply_markup=get_room_keyboard(is_creator=is_creator),
+        )
+
 
 @router.callback_query(F.data == "create_room")
 async def callback_create_room(callback: types.CallbackQuery, state: FSMContext):
@@ -2628,6 +2643,7 @@ async def callback_select_room(callback: types.CallbackQuery, state: FSMContext)
             return
 
         await set_active_room(db, user_id, room_id)
+        is_creator = await is_room_creator(db, room_id, user_id)
 
     await state.update_data(room_id=room_id, room_name=room.name)
     try:
@@ -2636,6 +2652,10 @@ async def callback_select_room(callback: types.CallbackQuery, state: FSMContext)
         )
     except Exception:
         await callback.message.answer(f"✅ Активная комната: {room.name}")
+    await callback.message.answer(
+        f"🏠 Управление комнатой: {room.name}",
+        reply_markup=get_room_keyboard(is_creator=is_creator),
+    )
     await callback.answer()
 
 
@@ -2684,27 +2704,33 @@ async def process_invite_username(message: types.Message, state: FSMContext):
     async with get_db() as db:
         target = await get_user_by_username(db, username)
         if not target:
-            await state.clear()
-            await message.answer(
-                f"❌ Пользователь {username} не найден.\nУбедитесь, что он использует бот и одобрен.",
-                reply_markup=get_main_keyboard(),
-            )
-            return
+            target_all = await get_user_by_username_all(db, username)
+            if not target_all:
+                await state.clear()
+                await message.answer(
+                    f"❌ Пользователь {username} не найден.\n"
+                    "Убедитесь, что он запустил бота (/start).",
+                    reply_markup=get_main_keyboard(),
+                )
+                return
+            else:
+                await state.clear()
+                await message.answer(
+                    f"❌ Пользователь {username} ещё не одобрен администратором.",
+                    reply_markup=get_main_keyboard(),
+                )
+                return
 
         if await is_room_member(db, room_id, target.telegram_id):
-            await state.clear()
             await message.answer(
                 f"❌ Пользователь {username} уже состоит в комнате «{room_name}».",
-                reply_markup=get_main_keyboard(),
             )
             return
 
         await add_room_member(db, room_id, target.telegram_id)
 
-    await state.clear()
     await message.answer(
         f"✅ {username} приглашён в комнату «{room_name}».",
-        reply_markup=get_main_keyboard(),
     )
 
 
