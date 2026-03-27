@@ -8,6 +8,9 @@ from utils import (
     get_unit_group,
     normalize_to_base,
     format_quantity,
+    parse_amount,
+    is_valid_unit,
+    build_quantity,
 )
 
 
@@ -322,3 +325,87 @@ class TestCombineQuantitiesNew:
     def test_combine_different_groups_l_kg(self):
         result = combine_quantities("1л", "1кг")
         assert result is None
+
+
+class TestParseAmount:
+    def test_valid_integer(self):
+        amount, error = parse_amount("5")
+        assert amount == 5
+        assert error is None
+
+    def test_valid_float(self):
+        amount, error = parse_amount("2.5")
+        assert amount == 2.5
+        assert error is None
+
+    def test_comma_decimal(self):
+        amount, error = parse_amount("3,5")
+        assert amount == 3.5
+        assert error is None
+
+    def test_negative(self):
+        amount, error = parse_amount("-1")
+        assert amount is None
+        assert "больше нуля" in error
+
+    def test_zero(self):
+        amount, error = parse_amount("0")
+        assert amount is None
+        assert "больше нуля" in error
+
+    def test_not_a_number(self):
+        amount, error = parse_amount("abc")
+        assert amount is None
+        assert "корректное число" in error
+
+    def test_empty_string(self):
+        amount, error = parse_amount("")
+        assert amount is None
+        assert "Введите число" in error
+
+    def test_none_input(self):
+        amount, error = parse_amount(None)
+        assert amount is None
+        assert "Введите число" in error
+
+    def test_whitespace(self):
+        amount, error = parse_amount("  ")
+        assert amount is None
+        assert "Введите число" in error
+
+    def test_float_converts_to_int(self):
+        amount, error = parse_amount("5.0")
+        assert amount == 5
+        assert isinstance(amount, int)
+
+
+class TestIsValidUnit:
+    def test_valid_units(self):
+        for unit in ["кг", "г", "шт", "л", "мл", "уп"]:
+            assert is_valid_unit(unit) is True
+
+    def test_invalid_unit(self):
+        assert is_valid_unit("xyz") is False
+
+    def test_none_unit(self):
+        assert is_valid_unit(None) is False
+
+    def test_empty_string(self):
+        assert is_valid_unit("") is False
+
+
+class TestBuildQuantity:
+    def test_with_amount_and_unit(self):
+        assert build_quantity(2, "кг") == "2кг"
+
+    def test_float_amount(self):
+        assert build_quantity(1.5, "л") == "1.5л"
+
+    def test_none_amount(self):
+        assert build_quantity(None, "кг") is None
+
+    def test_none_unit(self):
+        assert build_quantity(2, None) is None
+
+    def test_both_none(self):
+        assert build_quantity(None, None) is None

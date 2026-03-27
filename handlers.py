@@ -55,11 +55,15 @@ from database import (
     get_template_items_ordered,
 )
 from utils import (
+    UNITS,
     format_item,
     combine_quantities,
     get_unit_group,
     extract_unit,
     extract_quantity_parts,
+    is_valid_unit,
+    parse_amount,
+    build_quantity,
 )
 from states import AddProductStates, EditProductStates, TemplateStates
 from categories import (
@@ -422,8 +426,7 @@ async def skip_unit(message: types.Message, state: FSMContext):
 async def process_unit(message: types.Message, state: FSMContext):
     unit = message.text.strip() if message.text else None
 
-    valid_units = ["кг", "г", "шт", "л", "мл", "уп"]
-    if unit not in valid_units:
+    if not is_valid_unit(unit):
         await message.answer("❌ Выберите единицу из списка.")
         return
 
@@ -449,20 +452,9 @@ async def process_amount(message: types.Message, state: FSMContext):
     data = await state.get_data()
     unit = data.get("product_unit")
 
-    if not message.text or not message.text.strip():
-        await message.answer("❌ Введите число:")
-        return
-
-    try:
-        amount_str = message.text.strip().replace(",", ".")
-        amount = float(amount_str)
-        if amount <= 0:
-            await message.answer("❌ Количество должно быть больше нуля:")
-            return
-        if amount == int(amount):
-            amount = int(amount)
-    except ValueError:
-        await message.answer("❌ Введите корректное число:")
+    amount, error = parse_amount(message.text or "")
+    if error:
+        await message.answer(error)
         return
 
     await save_product(message, state, amount, unit)
@@ -475,10 +467,7 @@ async def save_product(message: types.Message, state: FSMContext, amount, unit):
     user = message.from_user
     user_display = get_user_display_name(user)
 
-    if amount is not None and unit:
-        quantity = f"{amount}{unit}"
-    else:
-        quantity = None
+    quantity = build_quantity(amount, unit)
 
     async with get_db() as db:
         user_categories = await get_all_product_categories(db)
@@ -565,7 +554,7 @@ async def cmd_add(message: types.Message, state: FSMContext):
 
     if " " in product_text:
         name_part, qty_part = product_text.rsplit(" ", 1)
-        if any(qty_part.endswith(u) for u in ["л", "мл", "кг", "г", "шт", "уп"]):
+        if any(qty_part.endswith(u) for u in UNITS):
             name = name_part.strip()
             quantity = qty_part.strip()
 
@@ -1350,8 +1339,7 @@ async def edit_skip_unit(message: types.Message, state: FSMContext):
 async def edit_process_unit(message: types.Message, state: FSMContext):
     unit = message.text.strip() if message.text else None
 
-    valid_units = ["кг", "г", "шт", "л", "мл", "уп"]
-    if unit not in valid_units:
+    if not is_valid_unit(unit):
         await message.answer("❌ Выберите единицу из списка.")
         return
 
@@ -1377,20 +1365,9 @@ async def edit_process_amount(message: types.Message, state: FSMContext):
     data = await state.get_data()
     unit = data.get("edit_unit")
 
-    if not message.text or not message.text.strip():
-        await message.answer("❌ Введите число:")
-        return
-
-    try:
-        amount_str = message.text.strip().replace(",", ".")
-        amount = float(amount_str)
-        if amount <= 0:
-            await message.answer("❌ Количество должно быть больше нуля:")
-            return
-        if amount == int(amount):
-            amount = int(amount)
-    except ValueError:
-        await message.answer("❌ Введите корректное число:")
+    amount, error = parse_amount(message.text or "")
+    if error:
+        await message.answer(error)
         return
 
     if data.get("edit_template_item_id"):
@@ -1403,10 +1380,7 @@ async def save_edited_product(message: types.Message, state: FSMContext, amount,
     data = await state.get_data()
     item_id = data.get("edit_item_id")
 
-    if amount is not None and unit:
-        quantity = f"{amount}{unit}"
-    else:
-        quantity = None
+    quantity = build_quantity(amount, unit)
 
     async with get_db() as db:
         await update_item_quantity(db, item_id, quantity)
@@ -1702,8 +1676,7 @@ async def skip_template_product_unit(message: types.Message, state: FSMContext):
 async def process_template_product_unit(message: types.Message, state: FSMContext):
     unit = message.text.strip() if message.text else None
 
-    valid_units = ["кг", "г", "шт", "л", "мл", "уп"]
-    if unit not in valid_units:
+    if not is_valid_unit(unit):
         await message.answer("❌ Выберите единицу из списка.")
         return
 
@@ -1739,20 +1712,9 @@ async def process_template_product_amount(message: types.Message, state: FSMCont
     data = await state.get_data()
     unit = data.get("template_product_unit")
 
-    if not message.text or not message.text.strip():
-        await message.answer("❌ Введите число:")
-        return
-
-    try:
-        amount_str = message.text.strip().replace(",", ".")
-        amount = float(amount_str)
-        if amount <= 0:
-            await message.answer("❌ Количество должно быть больше нуля:")
-            return
-        if amount == int(amount):
-            amount = int(amount)
-    except ValueError:
-        await message.answer("❌ Введите корректное число:")
+    amount, error = parse_amount(message.text or "")
+    if error:
+        await message.answer(error)
         return
 
     await save_template_product(message, state, amount, unit)
@@ -1765,10 +1727,7 @@ async def save_template_product(
     template_id = data.get("current_template_id") or data.get("template_id")
     name = data.get("template_product_name")
 
-    if amount is not None and unit:
-        quantity = f"{amount}{unit}"
-    else:
-        quantity = None
+    quantity = build_quantity(amount, unit)
 
     async with get_db() as db:
         user_categories = await get_all_product_categories(db)
@@ -2358,10 +2317,7 @@ async def save_edited_template_product(
     data = await state.get_data()
     item_id = data.get("edit_template_item_id")
 
-    if amount is not None and unit:
-        quantity = f"{amount}{unit}"
-    else:
-        quantity = None
+    quantity = build_quantity(amount, unit)
 
     template_id = data.get("current_template_id")
 

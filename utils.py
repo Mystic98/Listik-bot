@@ -5,6 +5,34 @@ UNITS = ["л", "мл", "кг", "г", "шт", "уп"]
 UNITS_PATTERN = "|".join(UNITS)
 
 
+def parse_amount(text: str) -> Tuple[Optional[Union[int, float]], Optional[str]]:
+    if not text or not text.strip():
+        return None, "❌ Введите число:"
+
+    try:
+        amount_str = text.strip().replace(",", ".")
+        amount = float(amount_str)
+        if amount <= 0:
+            return None, "❌ Количество должно быть больше нуля:"
+        if amount == int(amount):
+            amount = int(amount)
+        return amount, None
+    except ValueError:
+        return None, "❌ Введите корректное число:"
+
+
+def is_valid_unit(unit: Optional[str]) -> bool:
+    return unit in UNITS
+
+
+def build_quantity(
+    amount: Optional[Union[int, float]], unit: Optional[str]
+) -> Optional[str]:
+    if amount is not None and unit:
+        return f"{amount}{unit}"
+    return None
+
+
 def parse_quantity(text: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if not text or not text.strip():
         return None, None
