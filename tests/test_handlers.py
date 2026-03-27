@@ -309,8 +309,20 @@ class TestHandlers:
                         assert "✅ Куплено" in call_args
 
     @pytest.mark.asyncio
-    async def test_cmd_clear_success(self, mock_message, mock_state):
+    async def test_cmd_clear_shows_confirmation(self, mock_message, mock_state):
+        with patch("handlers.check_access", return_value=True):
+            from handlers import cmd_clear
+
+            await cmd_clear(mock_message, mock_state)
+
+            mock_message.answer.assert_called_once()
+            call_args = mock_message.answer.call_args[0][0]
+            assert "Удалить все купленные" in call_args
+
+    @pytest.mark.asyncio
+    async def test_callback_confirm_clear(self, mock_callback, mock_state):
         mock_db = AsyncMock()
+        mock_state.get_data = AsyncMock(return_value={"list_message_id": 100})
 
         with patch("handlers.check_access", return_value=True):
             with patch(
@@ -322,9 +334,14 @@ class TestHandlers:
                     with patch(
                         "handlers.build_list_message", return_value=("Список", None)
                     ):
-                        from handlers import cmd_clear
+                        from handlers import callback_confirm_clear
 
-                        await cmd_clear(mock_message, mock_state)
+                        mock_callback.from_user.id = 123456
+                        mock_callback.data = "confirm_clear_purchased"
+                        mock_callback.message.chat.id = 1
+                        mock_callback.message.delete = AsyncMock()
+                        mock_callback.answer = AsyncMock()
+                        await callback_confirm_clear(mock_callback, mock_state)
 
                         mock_clear.assert_called_once()
 

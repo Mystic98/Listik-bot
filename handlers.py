@@ -24,7 +24,6 @@ from database import (
     remove_item,
     clear_purchased_items,
     get_item_by_id,
-    find_pending_item_by_name,
     update_item_quantity,
     get_all_items_ordered,
     add_pending_user,
@@ -80,7 +79,7 @@ router = Router()
 async def delete_user_message(message: types.Message):
     try:
         await message.delete()
-    except:
+    except Exception:
         pass
 
 
@@ -110,6 +109,17 @@ def build_category_keyboard(
     if row:
         keyboard.append(row)
 
+    other_name = all_cats["other"]["name"]
+    marker = "✓ " if current_category == "other" else ""
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                text=f"{marker}{other_name}",
+                callback_data=f"{prefix}_{item_id}_other",
+            )
+        ]
+    )
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -129,7 +139,15 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
 
 def get_cancel_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="❌ Отмена")]], resize_keyboard=True
+        keyboard=[[KeyboardButton(text="❌ Отмена")]],
+        resize_keyboard=True,
+    )
+
+
+def get_template_done_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="✅ Готово"), KeyboardButton(text="❌ Отмена")]],
+        resize_keyboard=True,
     )
 
 
@@ -493,7 +511,7 @@ async def save_product(message: types.Message, state: FSMContext, amount, unit):
                             message_id=list_message_id,
                             reply_markup=keyboard,
                         )
-                    except:
+                    except Exception:
                         sent = await message.answer(text, reply_markup=keyboard)
                         await state.update_data(list_message_id=sent.message_id)
                 else:
@@ -516,7 +534,7 @@ async def save_product(message: types.Message, state: FSMContext, amount, unit):
                 message_id=list_message_id,
                 reply_markup=keyboard,
             )
-        except:
+        except Exception:
             sent = await message.answer(text, reply_markup=keyboard)
             await state.update_data(list_message_id=sent.message_id)
     else:
@@ -576,6 +594,7 @@ async def cmd_add(message: types.Message, state: FSMContext):
             new_quantity = combine_quantities(existing.quantity, quantity)
             if new_quantity:
                 await update_item_quantity(db, existing.id, new_quantity)
+                await message.answer(f"📋 Обновлено: {format_item(name, new_quantity)}")
                 return
 
         await add_item(db, name, quantity, user.id, user_display)
@@ -918,6 +937,27 @@ async def cmd_clear(message: types.Message, state: FSMContext):
         await message.answer("⛔ Доступ запрещён.")
         return
 
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Да, очистить", callback_data="confirm_clear_purchased"
+                ),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_clear"),
+            ]
+        ]
+    )
+    await message.answer(
+        "Удалить все купленные товары из списка?", reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "confirm_clear_purchased")
+async def callback_confirm_clear(callback: types.CallbackQuery, state: FSMContext):
+    if not await check_access(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён.", show_alert=True)
+        return
+
     data = await state.get_data()
     list_message_id = data.get("list_message_id")
 
@@ -927,14 +967,30 @@ async def cmd_clear(message: types.Message, state: FSMContext):
 
     if list_message_id:
         try:
-            await message.bot.edit_message_text(
+            await callback.message.bot.edit_message_text(
                 text,
-                chat_id=message.chat.id,
+                chat_id=callback.message.chat.id,
                 message_id=list_message_id,
                 reply_markup=keyboard,
             )
-        except:
+        except Exception:
             pass
+
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    await callback.answer(f"🗑 Удалено {count} купленных товаров")
+
+
+@router.callback_query(F.data == "cancel_clear")
+async def callback_cancel_clear(callback: types.CallbackQuery):
+    await callback.answer("Отменено")
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
 
 
 @router.message(Command("allow"))
@@ -975,7 +1031,7 @@ async def cmd_allow(message: types.Message):
                 replied_user.id,
                 "✅ Вам разрешён доступ к боту!\n\nНапишите /start чтобы начать.",
             )
-        except:
+        except Exception:
             pass
 
         await message.answer(f"✅ Доступ разрешён для {target_display}.")
@@ -1014,7 +1070,7 @@ async def cmd_allow(message: types.Message):
             target_user.telegram_id,
             "✅ Вам разрешён доступ к боту!\n\nНапишите /start чтобы начать.",
         )
-    except:
+    except Exception:
         pass
 
     await message.answer(f"✅ Доступ разрешён для @{username}.")
@@ -1099,7 +1155,7 @@ async def cmd_users(message: types.Message):
 
 
 @router.callback_query(F.data.startswith("cat_"))
-async def callback_set_category(callback: types.CallbackQuery):
+async def callback_set_category(callback: types.CallbackQuery, state: FSMContext):
     if not await check_access(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещён.", show_alert=True)
         return
@@ -1124,9 +1180,24 @@ async def callback_set_category(callback: types.CallbackQuery):
                 f"✅ Добавлено: {item_text}\n📁 {get_category_name(category)}",
                 reply_markup=cat_keyboard,
             )
-        except:
+        except Exception:
             pass
-        await callback.answer(f"Категория изменена на {get_category_name(category)}")
+
+        data = await state.get_data()
+        list_message_id = data.get("list_message_id")
+        if list_message_id:
+            text, keyboard = await build_list_message(db)
+            try:
+                await callback.bot.edit_message_text(
+                    text,
+                    chat_id=callback.message.chat.id,
+                    message_id=list_message_id,
+                    reply_markup=keyboard,
+                )
+            except Exception:
+                pass
+
+    await callback.answer(f"Категория изменена на {get_category_name(category)}")
 
 
 @router.callback_query(F.data.startswith("tcat_"))
@@ -1155,7 +1226,7 @@ async def callback_set_template_category(callback: types.CallbackQuery):
                 f"✅ Добавлено: {item_text}\n📁 {get_category_name(category)}",
                 reply_markup=cat_keyboard,
             )
-        except:
+        except Exception:
             pass
         await callback.answer(f"Категория изменена на {get_category_name(category)}")
 
@@ -1178,7 +1249,7 @@ async def callback_purchase(callback: types.CallbackQuery):
             text, keyboard = await build_list_message(db)
             try:
                 await callback.message.edit_text(text, reply_markup=keyboard)
-            except:
+            except Exception:
                 pass
             await callback.answer("✅ Отмечено как купленное")
         else:
@@ -1204,7 +1275,7 @@ async def callback_undo(callback: types.CallbackQuery):
             text, keyboard = await build_list_message(db)
             try:
                 await callback.message.edit_text(text, reply_markup=keyboard)
-            except:
+            except Exception:
                 pass
             await callback.answer("↩️ Возвращено в список")
         else:
@@ -1228,7 +1299,7 @@ async def callback_remove(callback: types.CallbackQuery):
             text, keyboard = await build_list_message(db)
             try:
                 await callback.message.edit_text(text, reply_markup=keyboard)
-            except:
+            except Exception:
                 pass
             await callback.answer("🗑 Удалено")
         else:
@@ -1258,7 +1329,7 @@ async def callback_approve(callback: types.CallbackQuery):
             telegram_id,
             "✅ Вам разрешён доступ к боту!\n\nНапишите /start чтобы начать.",
         )
-    except:
+    except Exception:
         pass
 
     await callback.answer("✅ Пользователь одобрен")
@@ -1271,7 +1342,7 @@ async def callback_approve(callback: types.CallbackQuery):
             await callback.message.edit_text(text, reply_markup=keyboard)
         else:
             await callback.message.edit_text(text)
-    except:
+    except Exception:
         pass
 
 
@@ -1298,7 +1369,7 @@ async def callback_reject(callback: types.CallbackQuery):
             await callback.message.edit_text(text, reply_markup=keyboard)
         else:
             await callback.message.edit_text(text)
-    except:
+    except Exception:
         pass
 
 
@@ -1513,7 +1584,7 @@ async def callback_back_to_templates(callback: types.CallbackQuery, state: FSMCo
 
     try:
         await callback.message.edit_text(text, reply_markup=keyboard)
-    except:
+    except Exception:
         pass
     await callback.message.answer(
         "📋 Меню шаблонов", reply_markup=get_templates_menu_keyboard()
@@ -1535,7 +1606,7 @@ async def callback_view_template(callback: types.CallbackQuery, state: FSMContex
 
     try:
         await callback.message.edit_text(text, reply_markup=keyboard)
-    except:
+    except Exception:
         pass
     await callback.message.answer(
         "Выберите действие:", reply_markup=get_template_manage_keyboard()
@@ -1597,8 +1668,8 @@ async def process_template_name(message: types.Message, state: FSMContext):
     await state.update_data(template_id=template_id, template_name=name)
     await state.set_state(TemplateStates.waiting_for_product_name)
     await message.answer(
-        f"Шаблон '{name}' создан.\n\nВведите название первого продукта:",
-        reply_markup=get_cancel_keyboard(),
+        f"Шаблон '{name}' создан.\n\nВведите название первого продукта (или нажмите 'Готово'):",
+        reply_markup=get_template_done_keyboard(),
     )
 
 
@@ -1714,12 +1785,7 @@ async def save_template_product(
     )
     await message.answer(
         "Введите следующий продукт или 'Готово':",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="✅ Готово"), KeyboardButton(text="❌ Отмена")]
-            ],
-            resize_keyboard=True,
-        ),
+        reply_markup=get_template_done_keyboard(),
     )
 
 
@@ -1927,7 +1993,7 @@ async def callback_delete_template_item(
             await callback.message.edit_text(text, reply_markup=keyboard)
         else:
             await callback.message.edit_text(text)
-    except:
+    except Exception:
         pass
     await callback.answer(f"🗑 Удалено: {item.name if item else ''}")
 

@@ -70,7 +70,7 @@ async def _init_tables(db: aiosqlite.Connection) -> None:
             "ALTER TABLE users ADD COLUMN is_approved BOOLEAN DEFAULT FALSE"
         )
         await db.commit()
-    except:
+    except Exception:
         pass
 
     try:
@@ -78,13 +78,13 @@ async def _init_tables(db: aiosqlite.Connection) -> None:
             "UPDATE users SET is_approved = TRUE WHERE is_approved IS NULL"
         )
         await db.commit()
-    except:
+    except Exception:
         pass
 
     try:
         await db.execute("ALTER TABLE items ADD COLUMN category TEXT DEFAULT 'other'")
         await db.commit()
-    except:
+    except Exception:
         pass
 
     try:
@@ -92,8 +92,17 @@ async def _init_tables(db: aiosqlite.Connection) -> None:
             "ALTER TABLE template_items ADD COLUMN category TEXT DEFAULT 'other'"
         )
         await db.commit()
-    except:
+    except Exception:
         pass
+
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_items_is_purchased ON items(is_purchased)"
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_items_category ON items(category)")
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_template_items_template_id ON template_items(template_id)"
+    )
+    await db.commit()
 
 
 @asynccontextmanager
@@ -482,7 +491,7 @@ async def rename_template(
         )
         await db.commit()
         return cursor.rowcount > 0
-    except:
+    except Exception:
         return False
 
 
