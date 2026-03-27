@@ -102,6 +102,7 @@ async def get_db(db_path: str = None):
         db_path = settings.database_path
     db = await aiosqlite.connect(db_path)
     db.row_factory = aiosqlite.Row
+    await db.execute("PRAGMA foreign_keys = ON")
     await _init_tables(db)
     try:
         yield db

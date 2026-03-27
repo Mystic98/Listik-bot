@@ -36,6 +36,7 @@ from database import (
     create_template,
     get_all_templates,
     get_template_by_id,
+    get_template_by_name,
     delete_template,
     rename_template,
     add_item_to_template,
@@ -176,6 +177,14 @@ def get_template_manage_keyboard() -> ReplyKeyboardMarkup:
     keyboard = [
         [
             KeyboardButton(text="➕ Добавить в шаблон"),
+            KeyboardButton(text="✏️ Редактировать товар"),
+        ],
+        [
+            KeyboardButton(text="🗑 Удалить товар"),
+            KeyboardButton(text="✏️ Переименовать"),
+        ],
+        [
+            KeyboardButton(text="➕ В список"),
             KeyboardButton(text="🗑 Удалить шаблон"),
         ],
         [KeyboardButton(text="◀️ Назад")],
@@ -790,13 +799,14 @@ async def cmd_done(message: types.Message):
     user_display = get_user_display_name(user)
 
     async with get_db() as db:
-        items = await get_pending_items(db)
+        items = await get_all_items_ordered(db)
+        pending_items = [item for item in items if not item.is_purchased]
 
-        if number > len(items):
+        if number > len(pending_items):
             await message.answer("❌ Продукт с таким номером не найден.")
             return
 
-        item = items[number - 1]
+        item = pending_items[number - 1]
         success = await mark_as_purchased(db, item.id, user.id, user_display)
 
     if success:
@@ -833,12 +843,20 @@ async def cmd_undo(message: types.Message):
 
     async with get_db() as db:
         items = await get_all_items_ordered(db)
+        pending_count = sum(1 for item in items if not item.is_purchased)
 
-        if number > len(items):
+        if number <= pending_count:
+            await message.answer("❌ Этот продукт ещё не куплен.")
+            return
+
+        purchased_items = [item for item in items if item.is_purchased]
+        purchased_number = number - pending_count
+
+        if purchased_number > len(purchased_items):
             await message.answer("❌ Продукт с таким номером не найден.")
             return
 
-        item = items[number - 1]
+        item = purchased_items[purchased_number - 1]
         success = await unmark_purchased(db, item.id)
 
     if success:
@@ -875,12 +893,17 @@ async def cmd_remove(message: types.Message):
 
     async with get_db() as db:
         items = await get_all_items_ordered(db)
+        pending_count = sum(1 for item in items if not item.is_purchased)
 
         if number > len(items):
             await message.answer("❌ Продукт с таким номером не найден.")
             return
 
-        item = items[number - 1]
+        if number <= pending_count:
+            item = [i for i in items if not i.is_purchased][number - 1]
+        else:
+            item = [i for i in items if i.is_purchased][number - pending_count - 1]
+
         success = await remove_item(db, item.id)
 
     if success:
@@ -1573,7 +1596,7 @@ async def process_template_name(message: types.Message, state: FSMContext):
     template_items = data.get("template_items")
 
     async with get_db() as db:
-        existing = await get_template_by_id(db, name)
+        existing = await get_template_by_name(db, name)
         if existing:
             await message.answer(
                 "❌ Шаблон с таким названием уже существует. Попробуйте другое:"
@@ -1583,6 +1606,10 @@ async def process_template_name(message: types.Message, state: FSMContext):
         if template_items:
             await create_template_from_items(db, name, template_items)
             await state.clear()
+            await message.answer(
+                f"✅ Шаблон '{name}' создан из {len(template_items)} товаров.",
+                reply_markup=get_main_keyboard(),
+            )
             return
 
         template_id = await create_template(db, name)

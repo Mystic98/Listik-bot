@@ -297,7 +297,7 @@ class TestHandlers:
             with patch(
                 "handlers.get_db", return_value=make_async_context_manager(mock_db)
             ):
-                with patch("handlers.get_pending_items", return_value=items):
+                with patch("handlers.get_all_items_ordered", return_value=items):
                     with patch("handlers.mark_as_purchased", return_value=True):
                         from handlers import cmd_done
 
