@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     bot_token: str = ""
     admin_id: int = 0
-    database_path: str = "grocery.db"
+    database_path: str = "/app/data/grocery.db"
 
 
 settings = Settings()

@@ -1,4 +1,6 @@
 .venv/
+.git/
+.gitignore
 __pycache__/
 *.pyc
 *.pyo
@@ -12,3 +14,8 @@ dist/
 build/
 data/
 logs/
+tests/
+.pytest_cache/
+.ruff_cache/
+AGENTS.md
+README.md

@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import logging.handlers
+import os
 import traceback
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher
@@ -9,8 +11,22 @@ from config import settings
 from handlers import router
 from database import get_db, get_approved_telegram_ids
 
+LOG_DIR = os.environ.get("LOG_DIR", "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+log_handler = logging.handlers.RotatingFileHandler(
+    filename=os.path.join(LOG_DIR, "bot.log"),
+    maxBytes=5 * 1024 * 1024,
+    backupCount=3,
+    encoding="utf-8",
+)
+log_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+)
+
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    handlers=[log_handler],
 )
 
 
