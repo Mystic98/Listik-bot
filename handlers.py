@@ -634,23 +634,7 @@ async def btn_add_template_to_list(message: types.Message, state: FSMContext):
     )
 
 
-@router.callback_query(F.data.startswith("add_template_"))
-async def callback_add_template_to_list(
-    callback: types.CallbackQuery, state: FSMContext
-):
-    template_id = int(callback.data.split("_")[2])
-    user = callback.from_user
-    user_display = get_user_display_name(user)
-
-    async with get_db() as db:
-        template = await get_template_by_id(db, template_id)
-        template_items = await get_template_items(db, template_id)
-        list_items = await get_pending_items(db)
-
-    if not template_items:
-        await callback.answer("❌ Шаблон пуст.", show_alert=True)
-        return
-
+def find_template_list_conflicts(template_items, list_items):
     conflicts = []
     non_conflicts = []
 
@@ -678,6 +662,28 @@ async def callback_add_template_to_list(
 
         if not conflict_found:
             non_conflicts.append(t_item)
+
+    return conflicts, non_conflicts
+
+
+@router.callback_query(F.data.startswith("add_template_"))
+async def callback_add_template_to_list(
+    callback: types.CallbackQuery, state: FSMContext
+):
+    template_id = int(callback.data.split("_")[2])
+    user = callback.from_user
+    user_display = get_user_display_name(user)
+
+    async with get_db() as db:
+        template = await get_template_by_id(db, template_id)
+        template_items = await get_template_items(db, template_id)
+        list_items = await get_pending_items(db)
+
+    if not template_items:
+        await callback.answer("❌ Шаблон пуст.", show_alert=True)
+        return
+
+    conflicts, non_conflicts = find_template_list_conflicts(template_items, list_items)
 
     if not conflicts:
         async with get_db() as db:
@@ -1597,7 +1603,9 @@ async def process_template_name(message: types.Message, state: FSMContext):
 
 
 @router.message(TemplateStates.waiting_for_product_name, F.text == "❌ Отмена")
-async def cancel_template_product_name(message: types.Message, state: FSMContext):
+@router.message(TemplateStates.waiting_for_product_unit, F.text == "❌ Отмена")
+@router.message(TemplateStates.waiting_for_product_amount, F.text == "❌ Отмена")
+async def cancel_template_product_flow(message: types.Message, state: FSMContext):
     await delete_user_message(message)
     data = await state.get_data()
     template_id = data.get("current_template_id") or data.get("template_id")
@@ -1647,25 +1655,6 @@ async def process_template_product_name(message: types.Message, state: FSMContex
     )
 
 
-@router.message(TemplateStates.waiting_for_product_unit, F.text == "❌ Отмена")
-async def cancel_template_product_unit(message: types.Message, state: FSMContext):
-    await delete_user_message(message)
-    data = await state.get_data()
-    template_id = data.get("current_template_id") or data.get("template_id")
-    await state.clear()
-    if template_id:
-        await state.update_data(current_template_id=template_id)
-        await message.answer(
-            "❌ Добавление товаров отменено.",
-            reply_markup=get_template_manage_keyboard(),
-        )
-    else:
-        await message.answer(
-            "❌ Добавление товаров отменено.",
-            reply_markup=get_templates_menu_keyboard(),
-        )
-
-
 @router.message(TemplateStates.waiting_for_product_unit, F.text == "⏭ Без меры")
 async def skip_template_product_unit(message: types.Message, state: FSMContext):
     await delete_user_message(message)
@@ -1686,25 +1675,6 @@ async def process_template_product_unit(message: types.Message, state: FSMContex
         f"Введите количество ({unit}):",
         reply_markup=get_amount_keyboard(),
     )
-
-
-@router.message(TemplateStates.waiting_for_product_amount, F.text == "❌ Отмена")
-async def cancel_template_product_amount(message: types.Message, state: FSMContext):
-    await delete_user_message(message)
-    data = await state.get_data()
-    template_id = data.get("current_template_id") or data.get("template_id")
-    await state.clear()
-    if template_id:
-        await state.update_data(current_template_id=template_id)
-        await message.answer(
-            "❌ Добавление товаров отменено.",
-            reply_markup=get_template_manage_keyboard(),
-        )
-    else:
-        await message.answer(
-            "❌ Добавление товаров отменено.",
-            reply_markup=get_templates_menu_keyboard(),
-        )
 
 
 @router.message(TemplateStates.waiting_for_product_amount)
@@ -2090,33 +2060,7 @@ async def btn_template_add_to_list(message: types.Message, state: FSMContext):
         await message.answer("❌ Шаблон пуст.")
         return
 
-    conflicts = []
-    non_conflicts = []
-
-    for t_item in template_items:
-        t_unit = extract_quantity_parts(t_item.quantity)[1] if t_item.quantity else None
-        t_group = get_unit_group(t_unit)
-
-        conflict_found = False
-        for l_item in list_items:
-            l_unit = (
-                extract_quantity_parts(l_item.quantity)[1] if l_item.quantity else None
-            )
-            l_group = get_unit_group(l_unit)
-
-            if l_item.name.lower() == t_item.name.lower() and l_group == t_group:
-                conflicts.append(
-                    {
-                        "template_item": t_item,
-                        "list_item": l_item,
-                        "group": t_group,
-                    }
-                )
-                conflict_found = True
-                break
-
-        if not conflict_found:
-            non_conflicts.append(t_item)
+    conflicts, non_conflicts = find_template_list_conflicts(template_items, list_items)
 
     if not conflicts:
         async with get_db() as db:
