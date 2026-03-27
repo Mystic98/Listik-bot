@@ -153,6 +153,48 @@ uv sync --all-extras
 uv run pytest
 ```
 
+## CI/CD
+
+Автоматическое тестирование и деплой при пуше в `main`.
+
+### CI (тесты)
+
+Каждый push/PR в main запускает pytest с проверкой покрытия (>=60%).
+
+### CD (деплой)
+
+Каждый push в main автоматически деплоит бота на VPS через SSH.
+
+### Настройка
+
+1. Сгенерировать SSH-ключ:
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/deploy_key -N ""
+   ```
+
+2. Публичный ключ добавить на VPS в `~/.ssh/authorized_keys`:
+   ```bash
+   ssh-copy-id -i ~/.ssh/deploy_key.pub root@IP_VPS
+   ```
+
+3. В GitHub -> Settings -> Secrets and variables -> Actions -> New repository secret:
+
+| Secret | Значение |
+|--------|----------|
+| `VPS_HOST` | IP адрес VPS |
+| `VPS_USER` | SSH пользователь (root) |
+| `VPS_SSH_KEY` | Содержимое приватного ключа `~/.ssh/deploy_key` |
+| `VPS_PATH` | Путь к проекту на VPS |
+
+### Ручной деплой
+
+```bash
+ssh root@IP_VPS
+cd /путь/к/проекту
+git pull origin main
+docker compose up -d --build
+```
+
 ## Структура проекта
 
 ```
@@ -166,5 +208,6 @@ uv run pytest
 ├── models.py         # Pydantic модели (User, Item, Template)
 ├── Dockerfile
 ├── docker-compose.yml
+├── .github/workflows/  # CI/CD (GitHub Actions)
 └── tests/
 ```
