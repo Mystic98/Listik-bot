@@ -73,3 +73,24 @@ class TemplateItem(BaseModel):
         if not v or not v.strip():
             raise ValueError("name cannot be empty")
         return v.strip()
+
+
+class Room(BaseModel):
+    id: int
+    name: str
+    creator_id: int
+    created_at: Optional[datetime] = None
+
+    @field_validator("name")
+    @classmethod
+    def name_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError("name cannot be empty")
+        return v.strip()
+
+
+class RoomMember(BaseModel):
+    room_id: int
+    telegram_id: int
+    role: str = "member"
+    joined_at: Optional[datetime] = None

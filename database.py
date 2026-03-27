@@ -4,7 +4,15 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from config import settings
-from models import User, Item, Template, TemplateWithCount, TemplateItem
+from models import (
+    User,
+    Item,
+    Template,
+    TemplateWithCount,
+    TemplateItem,
+    Room,
+    RoomMember,
+)
 from utils import extract_quantity_parts, get_unit_group
 
 
@@ -101,6 +109,59 @@ async def _init_tables(db: aiosqlite.Connection) -> None:
     await db.execute("CREATE INDEX IF NOT EXISTS idx_items_category ON items(category)")
     await db.execute(
         "CREATE INDEX IF NOT EXISTS idx_template_items_template_id ON template_items(template_id)"
+    )
+    await db.commit()
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS rooms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            creator_id INTEGER NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS room_members (
+            room_id INTEGER NOT NULL,
+            telegram_id INTEGER NOT NULL,
+            role TEXT DEFAULT 'member',
+            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (room_id, telegram_id),
+            FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
+        )
+    """)
+
+    await db.commit()
+
+    try:
+        await db.execute("ALTER TABLE items ADD COLUMN room_id INTEGER DEFAULT NULL")
+        await db.commit()
+    except Exception:
+        pass
+
+    try:
+        await db.execute(
+            "ALTER TABLE templates ADD COLUMN room_id INTEGER DEFAULT NULL"
+        )
+        await db.commit()
+    except Exception:
+        pass
+
+    try:
+        await db.execute(
+            "ALTER TABLE users ADD COLUMN active_room_id INTEGER DEFAULT NULL"
+        )
+        await db.commit()
+    except Exception:
+        pass
+
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_items_room_id ON items(room_id)")
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_templates_room_id ON templates(room_id)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_room_members_telegram_id ON room_members(telegram_id)"
     )
     await db.commit()
 
@@ -246,13 +307,14 @@ async def add_item(
     added_by: int,
     added_by_name: str,
     category: str = "other",
+    room_id: Optional[int] = None,
 ) -> int:
     cursor = await db.execute(
         """
-        INSERT INTO items (name, quantity, added_by, added_by_name, category)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO items (name, quantity, added_by, added_by_name, category, room_id)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (name, quantity, added_by, added_by_name, category),
+        (name, quantity, added_by, added_by_name, category, room_id),
     )
     await db.commit()
     return cursor.lastrowid
@@ -264,10 +326,18 @@ async def get_all_items(db: aiosqlite.Connection) -> List[Item]:
     return [Item.model_validate(dict(row)) for row in rows]
 
 
-async def get_pending_items(db: aiosqlite.Connection) -> List[Item]:
-    cursor = await db.execute(
-        "SELECT * FROM items WHERE is_purchased = FALSE ORDER BY created_at"
-    )
+async def get_pending_items(
+    db: aiosqlite.Connection, room_id: Optional[int] = None
+) -> List[Item]:
+    if room_id is not None:
+        cursor = await db.execute(
+            "SELECT * FROM items WHERE is_purchased = FALSE AND room_id = ? ORDER BY created_at",
+            (room_id,),
+        )
+    else:
+        cursor = await db.execute(
+            "SELECT * FROM items WHERE is_purchased = FALSE AND room_id IS NULL ORDER BY created_at",
+        )
     rows = await cursor.fetchall()
     return [Item.model_validate(dict(row)) for row in rows]
 
@@ -360,9 +430,20 @@ async def find_pending_item_by_name(
 
 
 async def find_pending_item_in_unit_group(
-    db: aiosqlite.Connection, name: str, group: str
+    db: aiosqlite.Connection,
+    name: str,
+    group: str,
+    room_id: Optional[int] = None,
 ) -> Optional[Item]:
-    cursor = await db.execute("SELECT * FROM items WHERE is_purchased = FALSE")
+    if room_id is not None:
+        cursor = await db.execute(
+            "SELECT * FROM items WHERE is_purchased = FALSE AND room_id = ?",
+            (room_id,),
+        )
+    else:
+        cursor = await db.execute(
+            "SELECT * FROM items WHERE is_purchased = FALSE AND room_id IS NULL",
+        )
     rows = await cursor.fetchall()
 
     name_lower = name.lower()
@@ -390,10 +471,19 @@ async def update_item_quantity(
     return cursor.rowcount > 0
 
 
-async def get_all_items_ordered(db: aiosqlite.Connection) -> List[Item]:
+async def get_all_items_ordered(
+    db: aiosqlite.Connection, room_id: Optional[int] = None
+) -> List[Item]:
+    if room_id is not None:
+        where = "WHERE room_id = ?"
+        params: tuple = (room_id,)
+    else:
+        where = "WHERE room_id IS NULL"
+        params = ()
     cursor = await db.execute(
-        """
+        f"""
         SELECT * FROM items 
+        {where}
         ORDER BY 
             is_purchased ASC,
             CASE category
@@ -412,36 +502,57 @@ async def get_all_items_ordered(db: aiosqlite.Connection) -> List[Item]:
                 ELSE 99
             END,
             created_at
-        """
+        """,
+        params,
     )
     rows = await cursor.fetchall()
     return [Item.model_validate(dict(row)) for row in rows]
 
 
-async def clear_purchased_items(db: aiosqlite.Connection) -> int:
-    cursor = await db.execute("DELETE FROM items WHERE is_purchased = TRUE")
+async def clear_purchased_items(
+    db: aiosqlite.Connection, room_id: Optional[int] = None
+) -> int:
+    if room_id is not None:
+        cursor = await db.execute(
+            "DELETE FROM items WHERE is_purchased = TRUE AND room_id = ?",
+            (room_id,),
+        )
+    else:
+        cursor = await db.execute("DELETE FROM items WHERE is_purchased = TRUE")
     await db.commit()
     return cursor.rowcount
 
 
-async def create_template(db: aiosqlite.Connection, name: str) -> int:
+async def create_template(
+    db: aiosqlite.Connection, name: str, room_id: Optional[int] = None
+) -> int:
     cursor = await db.execute(
-        "INSERT INTO templates (name) VALUES (?)",
-        (name,),
+        "INSERT INTO templates (name, room_id) VALUES (?, ?)",
+        (name, room_id),
     )
     await db.commit()
     return cursor.lastrowid
 
 
-async def get_all_templates(db: aiosqlite.Connection) -> List[TemplateWithCount]:
+async def get_all_templates(
+    db: aiosqlite.Connection, room_id: Optional[int] = None
+) -> List[TemplateWithCount]:
+    if room_id is not None:
+        where = "WHERE t.room_id = ?"
+        params: tuple = (room_id,)
+    else:
+        where = "WHERE t.room_id IS NULL"
+        params = ()
     cursor = await db.execute(
-        """
+        f"""
         SELECT t.*, COUNT(ti.id) as item_count
         FROM templates t
         LEFT JOIN template_items ti ON t.id = ti.template_id
+        {where}
         GROUP BY t.id
         ORDER BY t.created_at
-        """
+        """,
+        params,
     )
     rows = await cursor.fetchall()
     return [TemplateWithCount.model_validate(dict(row)) for row in rows]
@@ -459,9 +570,17 @@ async def get_template_by_id(
 
 
 async def get_template_by_name(
-    db: aiosqlite.Connection, name: str
+    db: aiosqlite.Connection, name: str, room_id: Optional[int] = None
 ) -> Optional[Template]:
-    cursor = await db.execute("SELECT * FROM templates")
+    if room_id is not None:
+        cursor = await db.execute(
+            "SELECT * FROM templates WHERE room_id = ?",
+            (room_id,),
+        )
+    else:
+        cursor = await db.execute(
+            "SELECT * FROM templates WHERE room_id IS NULL",
+        )
     rows = await cursor.fetchall()
 
     name_lower = name.lower()
@@ -553,9 +672,12 @@ async def update_template_item(
 
 
 async def create_template_from_items(
-    db: aiosqlite.Connection, name: str, items: List[Item]
+    db: aiosqlite.Connection,
+    name: str,
+    items: List[Item],
+    room_id: Optional[int] = None,
 ) -> int:
-    template_id = await create_template(db, name)
+    template_id = await create_template(db, name, room_id=room_id)
     for item in items:
         await add_item_to_template(
             db,
@@ -637,12 +759,18 @@ async def get_all_product_categories(
 
 
 async def get_pending_items_ordered(
-    db: aiosqlite.Connection,
+    db: aiosqlite.Connection, room_id: Optional[int] = None
 ) -> List[Item]:
+    if room_id is not None:
+        where = "is_purchased = FALSE AND room_id = ?"
+        params: tuple = (room_id,)
+    else:
+        where = "is_purchased = FALSE AND room_id IS NULL"
+        params = ()
     cursor = await db.execute(
-        """
+        f"""
         SELECT * FROM items 
-        WHERE is_purchased = FALSE 
+        WHERE {where}
         ORDER BY 
             CASE category
                 WHEN 'dairy' THEN 1
@@ -660,7 +788,8 @@ async def get_pending_items_ordered(
                 ELSE 99
             END,
             created_at
-        """
+        """,
+        params,
     )
     rows = await cursor.fetchall()
     return [Item.model_validate(dict(row)) for row in rows]
@@ -695,3 +824,162 @@ async def get_template_items_ordered(
     )
     rows = await cursor.fetchall()
     return [TemplateItem.model_validate(dict(row)) for row in rows]
+
+
+async def create_room(
+    db: aiosqlite.Connection, name: str, creator_id: int
+) -> Optional[Room]:
+    cursor = await db.execute(
+        "SELECT id FROM rooms WHERE creator_id = ?",
+        (creator_id,),
+    )
+    if await cursor.fetchone():
+        return None
+
+    cursor = await db.execute(
+        "INSERT INTO rooms (name, creator_id) VALUES (?, ?)",
+        (name, creator_id),
+    )
+    await db.commit()
+    room_id = cursor.lastrowid
+
+    await db.execute(
+        "INSERT INTO room_members (room_id, telegram_id, role) VALUES (?, ?, 'creator')",
+        (room_id, creator_id),
+    )
+    await db.execute(
+        "UPDATE users SET active_room_id = ? WHERE telegram_id = ?",
+        (room_id, creator_id),
+    )
+    await db.commit()
+
+    return await get_room_by_id(db, room_id)
+
+
+async def get_room_by_id(db: aiosqlite.Connection, room_id: int) -> Optional[Room]:
+    cursor = await db.execute("SELECT * FROM rooms WHERE id = ?", (room_id,))
+    row = await cursor.fetchone()
+    return Room.model_validate(dict(row)) if row else None
+
+
+async def get_user_rooms(db: aiosqlite.Connection, telegram_id: int) -> List[Room]:
+    cursor = await db.execute(
+        """
+        SELECT r.* FROM rooms r
+        JOIN room_members rm ON r.id = rm.room_id
+        WHERE rm.telegram_id = ?
+        ORDER BY r.created_at
+        """,
+        (telegram_id,),
+    )
+    rows = await cursor.fetchall()
+    return [Room.model_validate(dict(row)) for row in rows]
+
+
+async def get_active_room(db: aiosqlite.Connection, telegram_id: int) -> Optional[Room]:
+    cursor = await db.execute(
+        "SELECT active_room_id FROM users WHERE telegram_id = ?",
+        (telegram_id,),
+    )
+    row = await cursor.fetchone()
+    if not row or not row["active_room_id"]:
+        return None
+    return await get_room_by_id(db, row["active_room_id"])
+
+
+async def set_active_room(
+    db: aiosqlite.Connection, telegram_id: int, room_id: int
+) -> None:
+    await db.execute(
+        "UPDATE users SET active_room_id = ? WHERE telegram_id = ?",
+        (room_id, telegram_id),
+    )
+    await db.commit()
+
+
+async def delete_room(db: aiosqlite.Connection, room_id: int) -> bool:
+    await db.execute("DELETE FROM room_members WHERE room_id = ?", (room_id,))
+    cursor = await db.execute("DELETE FROM rooms WHERE id = ?", (room_id,))
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def rename_room(db: aiosqlite.Connection, room_id: int, new_name: str) -> bool:
+    cursor = await db.execute(
+        "UPDATE rooms SET name = ? WHERE id = ?",
+        (new_name, room_id),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def add_room_member(
+    db: aiosqlite.Connection, room_id: int, telegram_id: int
+) -> None:
+    await db.execute(
+        "INSERT OR IGNORE INTO room_members (room_id, telegram_id, role) VALUES (?, ?, 'member')",
+        (room_id, telegram_id),
+    )
+    await db.commit()
+
+
+async def remove_room_member(
+    db: aiosqlite.Connection, room_id: int, telegram_id: int
+) -> bool:
+    cursor = await db.execute(
+        "DELETE FROM room_members WHERE room_id = ? AND telegram_id = ?",
+        (room_id, telegram_id),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def get_room_members(db: aiosqlite.Connection, room_id: int) -> List[RoomMember]:
+    cursor = await db.execute(
+        "SELECT * FROM room_members WHERE room_id = ? ORDER BY joined_at",
+        (room_id,),
+    )
+    rows = await cursor.fetchall()
+    return [RoomMember.model_validate(dict(row)) for row in rows]
+
+
+async def is_room_member(
+    db: aiosqlite.Connection, room_id: int, telegram_id: int
+) -> bool:
+    cursor = await db.execute(
+        "SELECT 1 FROM room_members WHERE room_id = ? AND telegram_id = ?",
+        (room_id, telegram_id),
+    )
+    return await cursor.fetchone() is not None
+
+
+async def is_room_creator(
+    db: aiosqlite.Connection, room_id: int, telegram_id: int
+) -> bool:
+    cursor = await db.execute(
+        "SELECT 1 FROM rooms WHERE id = ? AND creator_id = ?",
+        (room_id, telegram_id),
+    )
+    return await cursor.fetchone() is not None
+
+
+async def leave_room(db: aiosqlite.Connection, telegram_id: int, room_id: int) -> None:
+    await remove_room_member(db, room_id, telegram_id)
+    cursor = await db.execute(
+        "SELECT active_room_id FROM users WHERE telegram_id = ?",
+        (telegram_id,),
+    )
+    row = await cursor.fetchone()
+    if row and row["active_room_id"] == room_id:
+        rooms = await get_user_rooms(db, telegram_id)
+        if rooms:
+            await db.execute(
+                "UPDATE users SET active_room_id = ? WHERE telegram_id = ?",
+                (rooms[0].id, telegram_id),
+            )
+        else:
+            await db.execute(
+                "UPDATE users SET active_room_id = NULL WHERE telegram_id = ?",
+                (telegram_id,),
+            )
+        await db.commit()

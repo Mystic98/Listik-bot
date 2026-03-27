@@ -18,3 +18,9 @@ class TemplateStates(StatesGroup):
     waiting_for_product_unit = State()
     waiting_for_product_amount = State()
     waiting_for_rename = State()
+
+
+class RoomStates(StatesGroup):
+    waiting_for_room_name = State()
+    waiting_for_invite_username = State()
+    waiting_for_rename_room = State()

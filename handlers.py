@@ -7,6 +7,7 @@ from aiogram.types import (
     KeyboardButton,
 )
 from aiogram.fsm.context import FSMContext
+from typing import Optional
 
 from config import settings
 from database import (
@@ -52,6 +53,19 @@ from database import (
     get_all_product_categories,
     get_pending_items_ordered,
     get_template_items_ordered,
+    get_active_room,
+    get_user_rooms,
+    create_room,
+    set_active_room,
+    delete_room as delete_room_db,
+    rename_room as rename_room_db,
+    get_room_by_id,
+    get_room_members,
+    add_room_member,
+    remove_room_member,
+    is_room_member,
+    is_room_creator,
+    leave_room as leave_room_db,
 )
 from utils import (
     UNITS,
@@ -64,7 +78,7 @@ from utils import (
     parse_amount,
     build_quantity,
 )
-from states import AddProductStates, EditProductStates, TemplateStates
+from states import AddProductStates, EditProductStates, TemplateStates, RoomStates
 from categories import (
     categorize_product,
     get_category_name,
@@ -131,7 +145,14 @@ def get_user_display_name(user: types.User) -> str:
 
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     keyboard = [
-        [KeyboardButton(text="📋 Список"), KeyboardButton(text="📋 Шаблоны")],
+        [
+            KeyboardButton(text="➕ Добавить"),
+            KeyboardButton(text="📋 Список"),
+        ],
+        [
+            KeyboardButton(text="📋 Шаблоны"),
+            KeyboardButton(text="🏠 Комната"),
+        ],
         [KeyboardButton(text="❓ Помощь")],
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
@@ -214,6 +235,40 @@ def get_template_manage_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
+def get_room_keyboard(is_creator: bool = False) -> ReplyKeyboardMarkup:
+    keyboard = [
+        [
+            KeyboardButton(text="👤 Пригласить"),
+            KeyboardButton(text="👥 Участники"),
+        ],
+    ]
+    if is_creator:
+        keyboard.append(
+            [
+                KeyboardButton(text="✏️ Переименовать"),
+                KeyboardButton(text="🗑 Удалить комнату"),
+            ]
+        )
+    else:
+        keyboard.append([KeyboardButton(text="🚪 Покинуть комнату")])
+    keyboard.append([KeyboardButton(text="◀️ Назад")])
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+
+async def require_room(message: types.Message, state: FSMContext) -> bool:
+    user_id = message.from_user.id
+    async with get_db() as db:
+        room = await get_active_room(db, user_id)
+    if not room:
+        await message.answer(
+            "🏠 У вас нет активной комнаты.\n\n"
+            "Нажмите «🏠 Комната», чтобы создать или выбрать комнату.",
+        )
+        return False
+    await state.update_data(room_id=room.id, room_name=room.name)
+    return True
+
+
 async def check_access(user_id: int) -> bool:
     if user_id == settings.admin_id:
         return True
@@ -221,13 +276,27 @@ async def check_access(user_id: int) -> bool:
         return await is_user_allowed(db, user_id)
 
 
-async def build_list_message(db) -> tuple:
-    items = await get_all_items_ordered(db)
+async def build_list_message(db, room_id: Optional[int] = None) -> tuple:
+    items = await get_all_items_ordered(db, room_id=room_id)
+    room_name = ""
+    if room_id:
+        room = await get_room_by_id(db, room_id)
+        room_name = room.name if room else ""
 
     if not items:
-        return "📋 Список покупок пуст.", None
+        header = (
+            f"📋 Список покупок — 🏠 {room_name}\n\n"
+            if room_name
+            else "📋 Список покупок пуст.\n\n"
+        )
+        return f"{header}Список пуст.", None
 
-    text = "📋 Список покупок:\n"
+    header = (
+        f"📋 Список покупок — 🏠 {room_name}\n\n"
+        if room_name
+        else "📋 Список покупок:\n"
+    )
+    text = header
     keyboard = []
 
     current_category = None
@@ -350,17 +419,27 @@ async def cmd_start(message: types.Message):
 
         if existing:
             if existing.is_approved:
-                await message.answer(
-                    f"👋 Привет, {user_display}!\n\n"
-                    "📋 Доступные команды:\n"
-                    "/add <продукт> — добавить продукт\n"
-                    "/list — показать список\n"
-                    "/done <N> — отметить купленным\n"
-                    "/undo <N> — вернуть в список\n"
-                    "/remove <N> — удалить\n"
-                    "/clear — удалить все купленные",
-                    reply_markup=get_main_keyboard(),
-                )
+                room = await get_active_room(db, user.id)
+                if not room:
+                    await message.answer(
+                        f"👋 Привет, {user_display}!\n\n"
+                        "🏠 У вас нет активной комнаты.\n\n"
+                        "Нажмите «🏠 Комната», чтобы создать или выбрать комнату.",
+                        reply_markup=get_main_keyboard(),
+                    )
+                else:
+                    await message.answer(
+                        f"👋 Привет, {user_display}!\n\n"
+                        f"🏠 Активная комната: {room.name}\n\n"
+                        "📋 Доступные команды:\n"
+                        "/add <продукт> — добавить продукт\n"
+                        "/list — показать список\n"
+                        "/done <N> — отметить купленным\n"
+                        "/undo <N> — вернуть в список\n"
+                        "/remove <N> — удалить\n"
+                        "/clear — удалить все купленные",
+                        reply_markup=get_main_keyboard(),
+                    )
             else:
                 await message.answer(
                     f"👋 Привет, {user_display}!\n\n"
@@ -482,6 +561,7 @@ async def save_product(message: types.Message, state: FSMContext, amount, unit):
     data = await state.get_data()
     name = data.get("product_name")
     list_message_id = data.get("list_message_id")
+    room_id = data.get("room_id")
     user = message.from_user
     user_display = get_user_display_name(user)
 
@@ -493,15 +573,19 @@ async def save_product(message: types.Message, state: FSMContext, amount, unit):
 
         group = get_unit_group(unit)
         if group:
-            existing = await find_pending_item_in_unit_group(db, name, group)
+            existing = await find_pending_item_in_unit_group(
+                db, name, group, room_id=room_id
+            )
         else:
-            existing = await find_pending_item_in_unit_group(db, name, "pieces")
+            existing = await find_pending_item_in_unit_group(
+                db, name, "pieces", room_id=room_id
+            )
 
         if existing:
             new_quantity = combine_quantities(existing.quantity, quantity)
             if new_quantity:
                 await update_item_quantity(db, existing.id, new_quantity)
-                text, keyboard = await build_list_message(db)
+                text, keyboard = await build_list_message(db, room_id)
                 await state.clear()
                 if list_message_id:
                     try:
@@ -522,8 +606,10 @@ async def save_product(message: types.Message, state: FSMContext, amount, unit):
                 )
                 return
 
-        item_id = await add_item(db, name, quantity, user.id, user_display, category)
-        text, keyboard = await build_list_message(db)
+        item_id = await add_item(
+            db, name, quantity, user.id, user_display, category, room_id=room_id
+        )
+        text, keyboard = await build_list_message(db, room_id)
 
     await state.clear()
     if list_message_id:
@@ -581,14 +667,21 @@ async def cmd_add(message: types.Message, state: FSMContext):
         return
 
     user_display = get_user_display_name(user)
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    category = categorize_product(name, [])
 
     async with get_db() as db:
         unit = extract_unit(quantity)
         group = get_unit_group(unit)
         if group:
-            existing = await find_pending_item_in_unit_group(db, name, group)
+            existing = await find_pending_item_in_unit_group(
+                db, name, group, room_id=room_id
+            )
         else:
-            existing = await find_pending_item_in_unit_group(db, name, "pieces")
+            existing = await find_pending_item_in_unit_group(
+                db, name, "pieces", room_id=room_id
+            )
 
         if existing:
             new_quantity = combine_quantities(existing.quantity, quantity)
@@ -597,7 +690,9 @@ async def cmd_add(message: types.Message, state: FSMContext):
                 await message.answer(f"📋 Обновлено: {format_item(name, new_quantity)}")
                 return
 
-        await add_item(db, name, quantity, user.id, user_display)
+        await add_item(
+            db, name, quantity, user.id, user_display, category, room_id=room_id
+        )
 
 
 @router.message(F.text == "📋 Список")
@@ -610,9 +705,15 @@ async def btn_list_menu(message: types.Message, state: FSMContext):
         await message.answer("⛔ Доступ запрещён.")
         return
 
+    if not await require_room(message, state):
+        return
+
+    data = await state.get_data()
+    room_id = data.get("room_id")
     await state.clear()
+    await state.update_data(room_id=room_id)
     async with get_db() as db:
-        text, keyboard = await build_list_message(db)
+        text, keyboard = await build_list_message(db, room_id)
 
     if keyboard:
         sent = await message.answer(text, reply_markup=keyboard)
@@ -629,8 +730,14 @@ async def btn_add_template_to_list(message: types.Message, state: FSMContext):
         await message.answer("⛔ Доступ запрещён.")
         return
 
+    if not await require_room(message, state):
+        return
+
+    data = await state.get_data()
+    room_id = data.get("room_id")
+
     async with get_db() as db:
-        templates = await get_all_templates(db)
+        templates = await get_all_templates(db, room_id=room_id)
 
     if not templates:
         await message.answer("❌ Нет сохранённых шаблонов.")
@@ -693,10 +800,13 @@ async def callback_add_template_to_list(
     user = callback.from_user
     user_display = get_user_display_name(user)
 
+    data = await state.get_data()
+    room_id = data.get("room_id")
+
     async with get_db() as db:
         template = await get_template_by_id(db, template_id)
         template_items = await get_template_items(db, template_id)
-        list_items = await get_pending_items(db)
+        list_items = await get_pending_items(db, room_id=room_id)
 
     if not template_items:
         await callback.answer("❌ Шаблон пуст.", show_alert=True)
@@ -714,6 +824,7 @@ async def callback_add_template_to_list(
                     user.id,
                     user_display,
                     item.category,
+                    room_id=room_id,
                 )
 
         await callback.message.edit_text(
@@ -770,8 +881,14 @@ async def btn_create_template_from_list(message: types.Message, state: FSMContex
         await message.answer("⛔ Доступ запрещён.")
         return
 
+    if not await require_room(message, state):
+        return
+
+    data = await state.get_data()
+    room_id = data.get("room_id")
+
     async with get_db() as db:
-        items = await get_pending_items(db)
+        items = await get_pending_items(db, room_id=room_id)
 
     if not items:
         await message.answer("❌ Список покупок пуст.")
@@ -786,11 +903,14 @@ async def btn_create_template_from_list(message: types.Message, state: FSMContex
 
 
 @router.message(Command("done"))
-async def cmd_done(message: types.Message):
+async def cmd_done(message: types.Message, state: FSMContext):
     user = message.from_user
 
     if not await check_access(user.id):
         await message.answer("⛔ Доступ запрещён.")
+        return
+
+    if not await require_room(message, state):
         return
 
     text = message.text or ""
@@ -812,8 +932,11 @@ async def cmd_done(message: types.Message):
 
     user_display = get_user_display_name(user)
 
+    data = await state.get_data()
+    room_id = data.get("room_id")
+
     async with get_db() as db:
-        items = await get_all_items_ordered(db)
+        items = await get_all_items_ordered(db, room_id=room_id)
         pending_items = [item for item in items if not item.is_purchased]
 
         if number > len(pending_items):
@@ -831,11 +954,14 @@ async def cmd_done(message: types.Message):
 
 
 @router.message(Command("undo"))
-async def cmd_undo(message: types.Message):
+async def cmd_undo(message: types.Message, state: FSMContext):
     user = message.from_user
 
     if not await check_access(user.id):
         await message.answer("⛔ Доступ запрещён.")
+        return
+
+    if not await require_room(message, state):
         return
 
     text = message.text or ""
@@ -855,8 +981,11 @@ async def cmd_undo(message: types.Message):
         await message.answer("❌ Номер должен быть положительным.")
         return
 
+    data = await state.get_data()
+    room_id = data.get("room_id")
+
     async with get_db() as db:
-        items = await get_all_items_ordered(db)
+        items = await get_all_items_ordered(db, room_id=room_id)
         pending_count = sum(1 for item in items if not item.is_purchased)
 
         if number <= pending_count:
@@ -881,11 +1010,14 @@ async def cmd_undo(message: types.Message):
 
 
 @router.message(Command("remove"))
-async def cmd_remove(message: types.Message):
+async def cmd_remove(message: types.Message, state: FSMContext):
     user = message.from_user
 
     if not await check_access(user.id):
         await message.answer("⛔ Доступ запрещён.")
+        return
+
+    if not await require_room(message, state):
         return
 
     text = message.text or ""
@@ -905,8 +1037,11 @@ async def cmd_remove(message: types.Message):
         await message.answer("❌ Номер должен быть положительным.")
         return
 
+    data = await state.get_data()
+    room_id = data.get("room_id")
+
     async with get_db() as db:
-        items = await get_all_items_ordered(db)
+        items = await get_all_items_ordered(db, room_id=room_id)
         pending_count = sum(1 for item in items if not item.is_purchased)
 
         if number > len(items):
@@ -960,10 +1095,11 @@ async def callback_confirm_clear(callback: types.CallbackQuery, state: FSMContex
 
     data = await state.get_data()
     list_message_id = data.get("list_message_id")
+    room_id = data.get("room_id")
 
     async with get_db() as db:
-        count = await clear_purchased_items(db)
-        text, keyboard = await build_list_message(db)
+        count = await clear_purchased_items(db, room_id=room_id)
+        text, keyboard = await build_list_message(db, room_id)
 
     if list_message_id:
         try:
@@ -1185,8 +1321,9 @@ async def callback_set_category(callback: types.CallbackQuery, state: FSMContext
 
         data = await state.get_data()
         list_message_id = data.get("list_message_id")
+        room_id = data.get("room_id")
         if list_message_id:
-            text, keyboard = await build_list_message(db)
+            text, keyboard = await build_list_message(db, room_id)
             try:
                 await callback.bot.edit_message_text(
                     text,
@@ -1232,7 +1369,7 @@ async def callback_set_template_category(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("purchase_"))
-async def callback_purchase(callback: types.CallbackQuery):
+async def callback_purchase(callback: types.CallbackQuery, state: FSMContext):
     user = callback.from_user
 
     if not await check_access(user.id):
@@ -1242,11 +1379,14 @@ async def callback_purchase(callback: types.CallbackQuery):
     item_id = int(callback.data.split("_")[1])
     user_display = get_user_display_name(user)
 
+    data = await state.get_data()
+    room_id = data.get("room_id")
+
     async with get_db() as db:
         success = await mark_as_purchased(db, item_id, user.id, user_display)
 
         if success:
-            text, keyboard = await build_list_message(db)
+            text, keyboard = await build_list_message(db, room_id)
             try:
                 await callback.message.edit_text(text, reply_markup=keyboard)
             except Exception:
@@ -1259,7 +1399,7 @@ async def callback_purchase(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("undo_"))
-async def callback_undo(callback: types.CallbackQuery):
+async def callback_undo(callback: types.CallbackQuery, state: FSMContext):
     user = callback.from_user
 
     if not await check_access(user.id):
@@ -1268,11 +1408,14 @@ async def callback_undo(callback: types.CallbackQuery):
 
     item_id = int(callback.data.split("_")[1])
 
+    data = await state.get_data()
+    room_id = data.get("room_id")
+
     async with get_db() as db:
         success = await unmark_purchased(db, item_id)
 
         if success:
-            text, keyboard = await build_list_message(db)
+            text, keyboard = await build_list_message(db, room_id)
             try:
                 await callback.message.edit_text(text, reply_markup=keyboard)
             except Exception:
@@ -1283,7 +1426,7 @@ async def callback_undo(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("remove_"))
-async def callback_remove(callback: types.CallbackQuery):
+async def callback_remove(callback: types.CallbackQuery, state: FSMContext):
     user = callback.from_user
 
     if not await check_access(user.id):
@@ -1292,11 +1435,14 @@ async def callback_remove(callback: types.CallbackQuery):
 
     item_id = int(callback.data.split("_")[1])
 
+    data = await state.get_data()
+    room_id = data.get("room_id")
+
     async with get_db() as db:
         success = await remove_item(db, item_id)
 
         if success:
-            text, keyboard = await build_list_message(db)
+            text, keyboard = await build_list_message(db, room_id)
             try:
                 await callback.message.edit_text(text, reply_markup=keyboard)
             except Exception:
@@ -1468,8 +1614,8 @@ async def save_edited_product(message: types.Message, state: FSMContext, amount,
     )
 
 
-async def build_templates_message(db) -> tuple:
-    templates = await get_all_templates(db)
+async def build_templates_message(db, room_id: Optional[int] = None) -> tuple:
+    templates = await get_all_templates(db, room_id=room_id)
 
     if not templates:
         text = "📋 Шаблоны пусты.\n\nСоздайте новый шаблон или сохраните текущий список как шаблон."
@@ -1564,9 +1710,15 @@ async def btn_templates(message: types.Message, state: FSMContext):
         await message.answer("⛔ Доступ запрещён.")
         return
 
+    if not await require_room(message, state):
+        return
+
+    data = await state.get_data()
+    room_id = data.get("room_id")
     await state.clear()
+    await state.update_data(room_id=room_id)
     async with get_db() as db:
-        text, keyboard = await build_templates_message(db)
+        text, keyboard = await build_templates_message(db, room_id=room_id)
 
     await message.answer(text, reply_markup=keyboard)
     await message.answer("📋 Меню шаблонов", reply_markup=get_templates_menu_keyboard())
@@ -1579,8 +1731,10 @@ async def callback_back_to_templates(callback: types.CallbackQuery, state: FSMCo
         return
 
     await state.clear()
+    data = await state.get_data()
+    room_id = data.get("room_id")
     async with get_db() as db:
-        text, keyboard = await build_templates_message(db)
+        text, keyboard = await build_templates_message(db, room_id=room_id)
 
     try:
         await callback.message.edit_text(text, reply_markup=keyboard)
@@ -1645,9 +1799,10 @@ async def process_template_name(message: types.Message, state: FSMContext):
     name = message.text.strip()
     data = await state.get_data()
     template_items = data.get("template_items")
+    room_id = data.get("room_id")
 
     async with get_db() as db:
-        existing = await get_template_by_name(db, name)
+        existing = await get_template_by_name(db, name, room_id=room_id)
         if existing:
             await message.answer(
                 "❌ Шаблон с таким названием уже существует. Попробуйте другое:"
@@ -1655,7 +1810,7 @@ async def process_template_name(message: types.Message, state: FSMContext):
             return
 
         if template_items:
-            await create_template_from_items(db, name, template_items)
+            await create_template_from_items(db, name, template_items, room_id=room_id)
             await state.clear()
             await message.answer(
                 f"✅ Шаблон '{name}' создан из {len(template_items)} товаров.",
@@ -1663,7 +1818,7 @@ async def process_template_name(message: types.Message, state: FSMContext):
             )
             return
 
-        template_id = await create_template(db, name)
+        template_id = await create_template(db, name, room_id=room_id)
 
     await state.update_data(template_id=template_id, template_name=name)
     await state.set_state(TemplateStates.waiting_for_product_name)
@@ -1859,8 +2014,10 @@ async def btn_back(message: types.Message, state: FSMContext):
     await state.clear()
 
     if template_id:
+        data = await state.get_data()
+        room_id = data.get("room_id")
         async with get_db() as db:
-            text, keyboard = await build_templates_message(db)
+            text, keyboard = await build_templates_message(db, room_id=room_id)
         await message.answer(text, reply_markup=keyboard)
         await message.answer(
             "📋 Меню шаблонов", reply_markup=get_templates_menu_keyboard()
@@ -2110,6 +2267,7 @@ async def btn_template_add_to_list(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
     template_id = data.get("current_template_id")
+    room_id = data.get("room_id")
     user = message.from_user
     user_display = get_user_display_name(user)
 
@@ -2120,7 +2278,7 @@ async def btn_template_add_to_list(message: types.Message, state: FSMContext):
     async with get_db() as db:
         template = await get_template_by_id(db, template_id)
         template_items = await get_template_items(db, template_id)
-        list_items = await get_pending_items(db)
+        list_items = await get_pending_items(db, room_id=room_id)
 
     if not template_items:
         await message.answer("❌ Шаблон пуст.")
@@ -2131,7 +2289,9 @@ async def btn_template_add_to_list(message: types.Message, state: FSMContext):
     if not conflicts:
         async with get_db() as db:
             for item in non_conflicts:
-                await add_item(db, item.name, item.quantity, user.id, user_display)
+                await add_item(
+                    db, item.name, item.quantity, user.id, user_display, room_id=room_id
+                )
 
         await state.clear()
         await message.answer(
@@ -2189,6 +2349,7 @@ async def callback_replace_all_conflicts(
     conflicts = data.get("conflicts", [])
     non_conflicts = data.get("non_conflicts", [])
     user_display = data.get("user_display")
+    room_id = data.get("room_id")
 
     async with get_db() as db:
         for conflict in conflicts:
@@ -2205,6 +2366,7 @@ async def callback_replace_all_conflicts(
                 callback.from_user.id,
                 user_display,
                 item.category,
+                room_id=room_id,
             )
 
     await state.clear()
@@ -2225,6 +2387,7 @@ async def callback_keep_all_conflicts(callback: types.CallbackQuery, state: FSMC
     conflicts = data.get("conflicts", [])
     non_conflicts = data.get("non_conflicts", [])
     user_display = data.get("user_display")
+    room_id = data.get("room_id")
 
     async with get_db() as db:
         for item in non_conflicts:
@@ -2235,6 +2398,7 @@ async def callback_keep_all_conflicts(callback: types.CallbackQuery, state: FSMC
                 callback.from_user.id,
                 user_display,
                 item.category,
+                room_id=room_id,
             )
 
     await state.clear()
@@ -2302,9 +2466,12 @@ async def callback_confirm_delete_template(
 ):
     template_id = int(callback.data.split("_")[3])
 
+    data = await state.get_data()
+    room_id = data.get("room_id")
+
     async with get_db() as db:
         await delete_template(db, template_id)
-        text, keyboard = await build_templates_message(db)
+        text, keyboard = await build_templates_message(db, room_id=room_id)
 
     await state.clear()
     await callback.message.edit_text("🗑 Шаблон удалён.")
@@ -2344,3 +2511,464 @@ async def save_edited_template_product(
         await message.answer(text, reply_markup=keyboard)
     else:
         await message.answer(text)
+
+
+@router.message(F.text == "🏠 Комната")
+async def btn_room(message: types.Message, state: FSMContext):
+    await delete_user_message(message)
+    if not await check_access(message.from_user.id):
+        await message.answer("⛔ Доступ запрещён.")
+        return
+
+    user_id = message.from_user.id
+    async with get_db() as db:
+        rooms = await get_user_rooms(db, user_id)
+        active_room = await get_active_room(db, user_id)
+
+    if not rooms:
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="➕ Создать комнату", callback_data="create_room"
+                    )
+                ]
+            ]
+        )
+        await message.answer(
+            "🏠 У вас пока нет комнат.\n\nСоздайте комнату, чтобы начать:",
+            reply_markup=keyboard,
+        )
+        return
+
+    keyboard = []
+    for room in rooms:
+        is_active = active_room and room.id == active_room.id
+        role = "👑 " if room.creator_id == user_id else ""
+        active_marker = " ◀️" if is_active else ""
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{role}{room.name}{active_marker}",
+                    callback_data=f"select_room_{room.id}",
+                )
+            ]
+        )
+
+    if not any(r.creator_id == user_id for r in rooms):
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text="➕ Создать комнату", callback_data="create_room"
+                )
+            ]
+        )
+
+    await message.answer(
+        "🏠 Ваши комнаты:", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+
+
+@router.callback_query(F.data == "create_room")
+async def callback_create_room(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    async with get_db() as db:
+        rooms = await get_user_rooms(db, user_id)
+        if any(r.creator_id == user_id for r in rooms):
+            await callback.answer(
+                "❌ Вы уже создали комнату. Можно быть создателем только одной.",
+                show_alert=True,
+            )
+            return
+
+    await state.set_state(RoomStates.waiting_for_room_name)
+    await callback.message.answer(
+        "Введите название комнаты:",
+        reply_markup=get_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(RoomStates.waiting_for_room_name)
+async def process_room_name(message: types.Message, state: FSMContext):
+    if not message.text or not message.text.strip():
+        await message.answer("❌ Название не может быть пустым. Попробуйте снова:")
+        return
+
+    name = message.text.strip()
+    user_id = message.from_user.id
+
+    async with get_db() as db:
+        room = await create_room(db, name, user_id)
+
+    if not room:
+        await state.clear()
+        await message.answer(
+            "❌ Вы уже создали комнату.",
+            reply_markup=get_main_keyboard(),
+        )
+        return
+
+    await state.clear()
+    await message.answer(
+        f"✅ Комната «{name}» создана!\n\nПригласите участников через «👤 Пригласить».",
+        reply_markup=get_main_keyboard(),
+    )
+
+
+@router.callback_query(F.data.startswith("select_room_"))
+async def callback_select_room(callback: types.CallbackQuery, state: FSMContext):
+    room_id = int(callback.data.split("_")[2])
+    user_id = callback.from_user.id
+
+    async with get_db() as db:
+        room = await get_room_by_id(db, room_id)
+        if not room or not await is_room_member(db, room_id, user_id):
+            await callback.answer("❌ Комната не найдена.", show_alert=True)
+            return
+
+        await set_active_room(db, user_id, room_id)
+
+    await state.update_data(room_id=room_id, room_name=room.name)
+    try:
+        await callback.message.edit_text(
+            f"✅ Активная комната: {room.name}",
+        )
+    except Exception:
+        await callback.message.answer(f"✅ Активная комната: {room.name}")
+    await callback.answer()
+
+
+@router.message(F.text == "👤 Пригласить")
+async def btn_invite_to_room(message: types.Message, state: FSMContext):
+    await delete_user_message(message)
+    if not await check_access(message.from_user.id):
+        await message.answer("⛔ Доступ запрещён.")
+        return
+
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    if not room_id:
+        await message.answer("❌ Сначала выберите комнату.")
+        return
+
+    user_id = message.from_user.id
+    async with get_db() as db:
+        if not await is_room_creator(db, room_id, user_id):
+            await message.answer(
+                "❌ Только создатель комнаты может приглашать участников."
+            )
+            return
+
+    await state.set_state(RoomStates.waiting_for_invite_username)
+    await message.answer(
+        "Введите @username пользователя, которого хотите пригласить:",
+        reply_markup=get_cancel_keyboard(),
+    )
+
+
+@router.message(RoomStates.waiting_for_invite_username)
+async def process_invite_username(message: types.Message, state: FSMContext):
+    if not message.text or not message.text.strip():
+        await message.answer("❌ Введите @username:")
+        return
+
+    username = message.text.strip()
+    if not username.startswith("@"):
+        username = f"@{username}"
+
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    room_name = data.get("room_name", "")
+
+    async with get_db() as db:
+        target = await get_user_by_username(db, username)
+        if not target:
+            await state.clear()
+            await message.answer(
+                f"❌ Пользователь {username} не найден.\nУбедитесь, что он использует бот и одобрен.",
+                reply_markup=get_main_keyboard(),
+            )
+            return
+
+        if await is_room_member(db, room_id, target.telegram_id):
+            await state.clear()
+            await message.answer(
+                f"❌ Пользователь {username} уже состоит в комнате «{room_name}».",
+                reply_markup=get_main_keyboard(),
+            )
+            return
+
+        await add_room_member(db, room_id, target.telegram_id)
+
+    await state.clear()
+    await message.answer(
+        f"✅ {username} приглашён в комнату «{room_name}».",
+        reply_markup=get_main_keyboard(),
+    )
+
+
+@router.callback_query(F.data.startswith("accept_invite_"))
+async def callback_accept_invite(callback: types.CallbackQuery, state: FSMContext):
+    room_id = int(callback.data.split("_")[2])
+    user_id = callback.from_user.id
+
+    async with get_db() as db:
+        room = await get_room_by_id(db, room_id)
+        if not room:
+            await callback.answer("❌ Комната не найдена.", show_alert=True)
+            return
+
+        if await is_room_member(db, room_id, user_id):
+            await callback.answer("❌ Вы уже состоите в этой комнате.", show_alert=True)
+            return
+
+        await add_room_member(db, room_id, user_id)
+        active = await get_active_room(db, user_id)
+        if not active:
+            await set_active_room(db, user_id, room_id)
+
+    await state.update_data(room_id=room_id, room_name=room.name)
+    try:
+        await callback.message.edit_text(
+            f"✅ Вы присоединились к комнате «{room.name}»!"
+        )
+    except Exception:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("reject_invite_"))
+async def callback_reject_invite(callback: types.CallbackQuery):
+    await callback.message.delete()
+    await callback.answer("Приглашение отклонено.")
+
+
+@router.message(F.text == "👥 Участники")
+async def btn_room_members(message: types.Message, state: FSMContext):
+    await delete_user_message(message)
+    if not await check_access(message.from_user.id):
+        await message.answer("⛔ Доступ запрещён.")
+        return
+
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    room_name = data.get("room_name", "")
+    user_id = message.from_user.id
+
+    if not room_id:
+        await message.answer("❌ Сначала выберите комнату.")
+        return
+
+    async with get_db() as db:
+        if not await is_room_member(db, room_id, user_id):
+            await message.answer("❌ Вы не состоите в этой комнате.")
+            return
+
+        members = await get_room_members(db, room_id)
+        room = await get_room_by_id(db, room_id)
+        is_creator = room and room.creator_id == user_id
+
+    text = f"👥 Участники комнаты «{room_name}» ({len(members)}):\n\n"
+
+    keyboard = []
+    for i, member in enumerate(members, 1):
+        role_icon = "👑" if member.role == "creator" else "👤"
+        async with get_db() as db:
+            user = await get_user_by_telegram_id(db, member.telegram_id)
+        display = user.full_name if user else f"ID: {member.telegram_id}"
+        if user and user.username:
+            display += f" (@{user.username})"
+        text += f"{i}. {role_icon} {display}\n"
+
+        if is_creator and member.role != "creator":
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"🗑 {display}",
+                        callback_data=f"remove_member_{member.telegram_id}_{room_id}",
+                    )
+                ]
+            )
+
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
+    await message.answer(text, reply_markup=reply_markup)
+
+
+@router.callback_query(F.data.startswith("remove_member_"))
+async def callback_remove_member(callback: types.CallbackQuery, state: FSMContext):
+    parts = callback.data.split("_")
+    target_id = int(parts[2])
+    room_id = int(parts[3])
+    user_id = callback.from_user.id
+
+    async with get_db() as db:
+        if not await is_room_creator(db, room_id, user_id):
+            await callback.answer(
+                "❌ Только создатель может удалять участников.", show_alert=True
+            )
+            return
+
+        if target_id == user_id:
+            await callback.answer("❌ Нельзя удалить себя.", show_alert=True)
+            return
+
+        await remove_room_member(db, room_id, target_id)
+        await leave_room_db(db, target_id, room_id)
+        room = await get_room_by_id(db, room_id)
+
+    try:
+        await callback.message.edit_text(
+            f"✅ Участник удалён из комнаты «{room.name if room else ''}»."
+        )
+    except Exception:
+        pass
+    await callback.answer()
+
+
+@router.message(F.text == "🚪 Покинуть комнату")
+async def btn_leave_room(message: types.Message, state: FSMContext):
+    await delete_user_message(message)
+    if not await check_access(message.from_user.id):
+        await message.answer("⛔ Доступ запрещён.")
+        return
+
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    user_id = message.from_user.id
+
+    if not room_id:
+        await message.answer("❌ Сначала выберите комнату.")
+        return
+
+    async with get_db() as db:
+        if await is_room_creator(db, room_id, user_id):
+            await message.answer(
+                "❌ Создатель не может покинуть комнату. Удалите её через «🗑 Удалить комнату»."
+            )
+            return
+
+        await leave_room_db(db, user_id, room_id)
+        rooms = await get_user_rooms(db, user_id)
+        new_active = rooms[0] if rooms else None
+
+    if new_active:
+        await state.update_data(room_id=new_active.id, room_name=new_active.name)
+    else:
+        await state.clear()
+
+    await message.answer(
+        "✅ Вы покинули комнату.",
+        reply_markup=get_main_keyboard(),
+    )
+
+
+@router.message(F.text == "✏️ Переименовать")
+async def btn_rename_room(message: types.Message, state: FSMContext):
+    await delete_user_message(message)
+    if not await check_access(message.from_user.id):
+        await message.answer("⛔ Доступ запрещён.")
+        return
+
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    if not room_id:
+        await message.answer("❌ Сначала выберите комнату.")
+        return
+
+    await state.set_state(RoomStates.waiting_for_rename_room)
+    await message.answer(
+        "Введите новое название комнаты:",
+        reply_markup=get_cancel_keyboard(),
+    )
+
+
+@router.message(RoomStates.waiting_for_rename_room)
+async def process_rename_room(message: types.Message, state: FSMContext):
+    if not message.text or not message.text.strip():
+        await message.answer("❌ Название не может быть пустым:")
+        return
+
+    new_name = message.text.strip()
+    data = await state.get_data()
+    room_id = data.get("room_id")
+
+    async with get_db() as db:
+        await rename_room_db(db, room_id, new_name)
+
+    await state.update_data(room_name=new_name)
+    await state.clear()
+    await message.answer(
+        f"✅ Комната переименована в «{new_name}».",
+        reply_markup=get_main_keyboard(),
+    )
+
+
+@router.message(F.text == "🗑 Удалить комнату")
+async def btn_delete_room(message: types.Message, state: FSMContext):
+    await delete_user_message(message)
+    if not await check_access(message.from_user.id):
+        await message.answer("⛔ Доступ запрещён.")
+        return
+
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    room_name = data.get("room_name", "")
+    if not room_id:
+        await message.answer("❌ Сначала выберите комнату.")
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Да, удалить",
+                    callback_data=f"confirm_delete_room_{room_id}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отмена", callback_data="cancel_delete_room"
+                ),
+            ]
+        ]
+    )
+    await message.answer(
+        f"⚠️ Удалить комнату «{room_name}» и все данные (список, шаблоны)?",
+        reply_markup=keyboard,
+    )
+
+
+@router.callback_query(F.data.startswith("confirm_delete_room_"))
+async def callback_confirm_delete_room(
+    callback: types.CallbackQuery, state: FSMContext
+):
+    room_id = int(callback.data.split("_")[3])
+    user_id = callback.from_user.id
+
+    async with get_db() as db:
+        if not await is_room_creator(db, room_id, user_id):
+            await callback.answer(
+                "❌ Только создатель может удалить комнату.", show_alert=True
+            )
+            return
+
+        await delete_room_db(db, room_id)
+        rooms = await get_user_rooms(db, user_id)
+
+    await state.clear()
+    if rooms:
+        await state.update_data(room_id=rooms[0].id, room_name=rooms[0].name)
+    try:
+        await callback.message.edit_text("🗑 Комната удалена.")
+    except Exception:
+        pass
+    await callback.message.answer(
+        "🏠 Комната удалена.",
+        reply_markup=get_main_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "cancel_delete_room")
+async def callback_cancel_delete_room(callback: types.CallbackQuery):
+    await callback.message.delete()
+    await callback.answer("Отменено.")

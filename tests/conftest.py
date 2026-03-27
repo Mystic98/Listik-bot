@@ -34,6 +34,7 @@ async def db():
             purchased_by INTEGER,
             purchased_by_name TEXT,
             category TEXT DEFAULT 'other',
+            room_id INTEGER DEFAULT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             purchased_at DATETIME
         )
@@ -43,6 +44,7 @@ async def db():
         CREATE TABLE IF NOT EXISTS templates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
+            room_id INTEGER DEFAULT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -64,6 +66,26 @@ async def db():
             name TEXT PRIMARY KEY,
             category TEXT NOT NULL,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS rooms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            creator_id INTEGER NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS room_members (
+            room_id INTEGER NOT NULL,
+            telegram_id INTEGER NOT NULL,
+            role TEXT DEFAULT 'member',
+            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (room_id, telegram_id),
+            FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
         )
     """)
 
