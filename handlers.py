@@ -676,7 +676,7 @@ async def cmd_add(message: types.Message, state: FSMContext):
     user_display = get_user_display_name(user)
     data = await state.get_data()
     room_id = data.get("room_id")
-    category = categorize_product(name, [])
+    category = categorize_product(name)
 
     async with get_db() as db:
         unit = extract_unit(quantity)

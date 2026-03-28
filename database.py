@@ -167,7 +167,7 @@ async def _init_tables(db: aiosqlite.Connection) -> None:
 
 
 @asynccontextmanager
-async def get_db(db_path: str = None):
+async def get_db(db_path: Optional[str] = None):
     if db_path is None:
         db_path = settings.database_path
     db = await aiosqlite.connect(db_path)
@@ -317,6 +317,7 @@ async def add_item(
         (name, quantity, added_by, added_by_name, category, room_id),
     )
     await db.commit()
+    assert cursor.lastrowid is not None
     return cursor.lastrowid
 
 
@@ -531,6 +532,7 @@ async def create_template(
         (name, room_id),
     )
     await db.commit()
+    assert cursor.lastrowid is not None
     return cursor.lastrowid
 
 
@@ -626,6 +628,7 @@ async def add_item_to_template(
         (template_id, name, quantity, category),
     )
     await db.commit()
+    assert cursor.lastrowid is not None
     return cursor.lastrowid
 
 
@@ -842,6 +845,7 @@ async def create_room(
     )
     await db.commit()
     room_id = cursor.lastrowid
+    assert room_id is not None
 
     await db.execute(
         "INSERT INTO room_members (room_id, telegram_id, role) VALUES (?, ?, 'creator')",

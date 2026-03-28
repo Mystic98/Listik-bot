@@ -3,7 +3,7 @@ from difflib import get_close_matches
 from typing import Optional, Dict, List, Tuple
 
 
-CATEGORIES = {
+CATEGORIES: Dict[str, Dict[str, str | int]] = {
     "dairy": {"name": "🥛 Молочные продукты", "order": 1},
     "meat": {"name": "🥩 Мясо", "order": 2},
     "fish": {"name": "🐟 Рыба и морепродукты", "order": 3},
@@ -728,8 +728,8 @@ def categorize_product(
 
 def get_category_name(category_id: str) -> str:
     if category_id in CATEGORIES:
-        return CATEGORIES[category_id]["name"]
-    return CATEGORIES["other"]["name"]
+        return str(CATEGORIES[category_id]["name"])
+    return str(CATEGORIES["other"]["name"])
 
 
 def get_category_emoji(category_id: str) -> str:
@@ -742,5 +742,5 @@ def get_sorted_categories() -> List[str]:
     return sorted(CATEGORIES.keys(), key=lambda x: CATEGORIES[x]["order"])
 
 
-def get_all_categories() -> Dict[str, Dict[str, any]]:
+def get_all_categories() -> Dict[str, Dict[str, str | int]]:
     return CATEGORIES.copy()

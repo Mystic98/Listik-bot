@@ -5,271 +5,154 @@ Guidelines for AI coding agents working on this Telegram grocery shopping bot.
 ## Build/Lint/Test Commands
 
 ```bash
-# Install dependencies (uses uv package manager)
-uv sync
+uv sync                          # Install dependencies
+uv run python bot.py             # Run the bot
 
-# Install dev dependencies
-uv sync --all-extras
+uv run pytest                    # Run all tests (requires 60% coverage)
+uv run pytest --no-cov           # Run tests without coverage check
+uv run pytest -v                 # Verbose output
+uv run pytest --cov-report=html  # HTML coverage report
 
-# Run the bot
-uv run python bot.py
-
-# Run all tests
-uv run pytest
-
-# Run all tests with coverage (default, requires 60% coverage)
-uv run pytest --cov=. --cov-report=term-missing
-
-# Run a single test file
-uv run pytest tests/test_handlers.py
-
-# Run a single test class
-uv run pytest tests/test_handlers.py::TestHandlers
-
-# Run a single test
-uv run pytest tests/test_handlers.py::TestHandlers::test_cmd_start_new_user_pending
-
-# Run tests with verbose output
-uv run pytest -v
-
-# Run tests with HTML coverage report
-uv run pytest --cov-report=html
-
-# Run tests without coverage requirement
-uv run pytest --no-cov
+uv run pytest tests/test_handlers.py                           # Single file
+uv run pytest tests/test_handlers.py::TestHandlers             # Single class
+uv run pytest tests/test_handlers.py::TestHandlers::test_cmd_start_new_user_pending  # Single test
 ```
 
 ## Project Structure
 
 ```
-├── bot.py          # Entry point, bot initialization, error handler
-├── config.py       # Environment configuration (BOT_TOKEN, ADMIN_ID, DATABASE_PATH)
-├── database.py     # SQLite operations with aiosqlite
-├── handlers.py     # All Telegram command/message/callback handlers
-├── states.py       # FSM states for multi-step flows
-├── utils.py        # Quantity parsing, formatting, unit conversion
+├── bot.py          # Entry point, error handler, weekly reminder scheduler
+├── config.py       # pydantic-settings: bot_token, admin_id, database_path
+├── database.py     # SQLite + aiosqlite, all DB functions (~985 lines)
+├── handlers.py     # All Telegram handlers + helper functions (~3000 lines)
+├── models.py       # pydantic models: User, Item, Template, TemplateItem, Room, RoomMember
+├── states.py       # FSM state groups: AddProduct, EditProduct, Template, Room
+├── utils.py        # parse_amount, is_valid_unit, build_quantity, format_item, etc.
+├── categories.py   # 13 categories, keyword dict, fuzzy matching, categorize_product()
 └── tests/
-    ├── conftest.py     # Shared fixtures (db, admin_user, regular_user)
+    ├── conftest.py       # Shared fixtures, make_async_context_manager helper
+    ├── test_handlers.py  # TestHandlers, TestTemplates, TestTemplateFSM, TestRoomHandlers
     ├── test_database.py
-    ├── test_handlers.py
+    ├── test_categories.py
     └── test_utils.py
 ```
 
-## Code Style Guidelines
+## Code Style
 
 ### Imports
 
+Standard library → third-party → local (blank line before local). One import per line for local modules:
 ```python
-# Standard library first
-import asyncio
-import re
-from contextlib import asynccontextmanager
-from typing import Optional, List, Dict, Any, Tuple, Union
-
-# Third-party next
-import aiosqlite
 from aiogram import Router, F, types
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-# Local imports last (blank line before)
-from config import ADMIN_ID
+from config import settings
 from database import get_db, add_item
 from utils import format_item, combine_quantities
-from states import AddProductStates
+from states import AddProductStates, RoomStates
+from categories import categorize_product, get_all_categories
 ```
 
-### Naming Conventions
+### Naming
 
-- **Functions/variables**: `snake_case` - e.g., `get_pending_items`, `user_display`
-- **Classes**: `PascalCase` - e.g., `AddProductStates`, `TestHandlers`
-- **Constants**: `UPPER_SNAKE_CASE` - e.g., `BOT_TOKEN`, `ADMIN_ID`, `UNITS`
-- **Private functions**: Prefix with underscore - e.g., `_init_tables()`
-- **Handler functions**: Prefix with action - e.g., `cmd_start`, `btn_list_menu`, `callback_purchase`
-- **FSM states**: `waiting_for_<what>` - e.g., `waiting_for_name`, `waiting_for_unit`
+- **Functions/variables**: `snake_case`
+- **Classes**: `PascalCase`
+- **Constants**: `UPPER_SNAKE_CASE`
+- **Private functions**: prefix `_` — `_init_tables()`
+- **Handlers**: prefix by trigger type — `cmd_start`, `btn_list_menu`, `callback_purchase`, `process_room_name`
+- **FSM states**: `waiting_for_<what>` — `waiting_for_name`, `waiting_for_room_name`
+- **Keyboard builders**: `get_<name>_keyboard()` — `get_main_keyboard()`, `get_room_keyboard()`
+- **Message builders**: `build_<name>_message()` — `build_list_message()`, `build_templates_message()`
 
-### Async Patterns
+### No Comments
 
-- Use `async with get_db() as db:` for database operations
-- All database functions are async
-- Use `AsyncMock` and `MagicMock` for testing async code
-
-```python
-# Database context manager pattern
-async with get_db() as db:
-    items = await get_pending_items(db)
-    await add_item(db, name, quantity, user.id, user_display)
-```
+Do not add comments to code unless explicitly asked.
 
 ### Type Hints
 
-Use type hints for function signatures:
-
+All function signatures must have type hints:
 ```python
-def get_user_display_name(user: types.User) -> str:
-    ...
-
-async def add_user(
-    db: aiosqlite.Connection,
-    telegram_id: int,
-    username: Optional[str],
-    full_name: str,
-    added_by: int,
-    approved: bool = True,
-) -> None:
-    ...
-
-def combine_quantities(q1: Optional[str], q2: Optional[str]) -> Optional[str]:
-    ...
+async def add_item(db: aiosqlite.Connection, name: str, quantity: Optional[str],
+                   added_by: int, added_by_name: str, category: str = "other",
+                   room_id: Optional[int] = None) -> int:
 ```
 
 ### Error Handling
 
-- Use try/except for message edits that may fail (message deleted, too old):
+- Use `except Exception:` (never bare `except:`)
+- Silent catch only for Telegram message edits that may fail (deleted/too old):
 ```python
 try:
     await callback.message.edit_text(text, reply_markup=keyboard)
-except:
-    pass  # Message may have been deleted
+except Exception:
+    pass
 ```
+- For user input: validate, send error message, return early
 
-- For user input validation, send error message and return early:
-```python
-if not message.text or not message.text.strip():
-    await message.answer("❌ Название не может быть пустым.")
-    return
-```
+## Architecture
 
-### Telegram Bot Patterns
+### Multi-Room System
 
-**Reply Keyboards:**
-```python
-def get_main_keyboard() -> ReplyKeyboardMarkup:
-    keyboard = [
-        [KeyboardButton(text="📋 Список"), KeyboardButton(text="📋 Шаблоны")],
-        [KeyboardButton(text="❓ Помощь")],
-    ]
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-```
+All data (items, templates) is scoped by `room_id`. Most DB functions accept `room_id: Optional[int] = None`.
 
-**Inline Keyboards:**
-```python
-keyboard = [
-    [
-        InlineKeyboardButton(text=f"✅ {i}", callback_data=f"purchase_{item['id']}"),
-        InlineKeyboardButton(text=f"🗑 {i}", callback_data=f"remove_{item['id']}"),
-    ]
-]
-await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
-```
+**Access flow:** Global admin approval → room membership. `require_room(message, state)` guard checks for active room before list/template operations.
 
-**FSM State Management:**
-```python
-# Set state
-await state.set_state(AddProductStates.waiting_for_name)
+**Room keyboard** (`get_room_keyboard(is_creator)`): Invite, Members, Rename/Delete (creator only), Leave (member only).
 
-# Store data
-await state.update_data(product_name=name)
+### Access Control
 
-# Retrieve data
-data = await state.get_data()
-name = data.get("product_name")
+1. New user `/start` → pending list
+2. Admin `/pending` → approve/reject via inline buttons
+3. Approved users can create/join rooms
+4. Room invite checks: user exists AND `is_approved = TRUE` (via `get_user_by_username`)
 
-# Clear state
-await state.clear()
-```
+### Database Patterns
 
-**Callback Query Response:**
-```python
-@router.callback_query(F.data.startswith("purchase_"))
-async def callback_purchase(callback: types.CallbackQuery):
-    # ... business logic ...
-    await callback.answer("✅ Отмечено как купленное")  # Popup notification
-```
+- All DB functions are async, use `async with get_db() as db:`
+- DB functions return pydantic models (User, Item, TemplateWithCount, etc.)
+- `CATEGORIES` dict in `categories.py` is static config — `all_cats[cat_id]["name"]` is correct as-is
 
-## Testing Conventions
+### Cyrillic Case Sensitivity
 
-### Test Structure
+SQLite's `LOWER()` doesn't handle Cyrillic. Use Python's `.lower()` for comparisons.
+
+### Key Pitfalls
+
+- `state.clear()` wipes ALL state data — save `room_id` before clearing if needed
+- `F.data.startswith("edit_")` matches both `edit_1` and `edit_template_item_1` — use `F.data.regexp(r"^edit_\d+$")` for precise matching
+- When adding items from templates, pass `room_id` to `add_item` and `get_pending_items`
+- `get_user_by_username` filters `is_approved = TRUE`; use `get_user_by_username_all` to check pending users
+
+## Testing Patterns
 
 ```python
-class TestHandlers:
+class TestRoomHandlers:
     @pytest.fixture
     def mock_message(self):
         message = AsyncMock()
         message.from_user = MagicMock()
         message.from_user.id = 123456
+        message.from_user.username = "test_user"
+        message.from_user.full_name = "Test User"
+        message.text = ""
         message.answer = AsyncMock()
+        message.delete = AsyncMock()
         return message
 
+    @pytest.fixture
+    def mock_state(self):
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={})
+        state.update_data = AsyncMock()
+        state.set_state = AsyncMock()
+        state.clear = AsyncMock()
+        return state
+
     @pytest.mark.asyncio
-    async def test_cmd_start_new_user(self, mock_message):
-        # Arrange
+    async def test_something(self, mock_message, mock_state):
         with patch("handlers.check_access", return_value=True):
-            # Act
-            from handlers import cmd_start
-            await cmd_start(mock_message)
-            
-            # Assert
-            mock_message.answer.assert_called_once()
+            with patch("handlers.require_room", return_value=True):
+                with patch("handlers.get_db", return_value=make_async_context_manager(mock_db)):
+                    ...
 ```
 
-### Async Context Manager Helper
-
-```python
-def make_async_context_manager(return_value):
-    cm = AsyncMock()
-    cm.__aenter__.return_value = return_value
-    cm.__aexit__.return_value = None
-    return cm
-
-# Usage
-with patch("handlers.get_db", return_value=make_async_context_manager(mock_db)):
-    ...
-```
-
-### Database Fixture
-
-Tests use in-memory SQLite:
-```python
-@pytest.fixture
-async def db():
-    db = await aiosqlite.connect(":memory:")
-    db.row_factory = aiosqlite.Row
-    # ... create tables ...
-    yield db
-    await db.close()
-```
-
-## Business Logic Notes
-
-### Unit Groups
-
-Products are grouped for combining quantities:
-- **Weight**: кг, г (kg, g)
-- **Volume**: л, мл (l, ml)  
-- **Pieces**: шт, уп, or no unit
-
-Same product with same unit group = quantities combined (e.g., "молоко 2л" + "молоко 500мл" = "молоко 2.5л")
-
-### Cyrillic Case Sensitivity
-
-SQLite's `LOWER()` doesn't handle Cyrillic. Use Python's `.lower()` for case-insensitive comparisons:
-```python
-if item["name"].lower() == other_item["name"].lower():
-    ...
-```
-
-### Access Control
-
-1. New users → pending list (not approved)
-2. Admin sees pending via `/pending` command
-3. Admin approves/rejects via inline buttons
-4. Only approved users can use bot features
-
-## Key Files to Modify
-
-- **New command**: Add to `handlers.py`, add tests to `test_handlers.py`
-- **New database field**: Update `database.py` schema, update tests
-- **New unit type**: Update `utils.py` `UNITS` list and `get_unit_group()`
-- **New FSM flow**: Add state class to `states.py`, handlers to `handlers.py`
+Use `make_async_context_manager(mock_db)` to mock `get_db()`. For handlers that call `require_room`, mock it to return `True` to skip room checks.
