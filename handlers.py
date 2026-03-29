@@ -485,7 +485,14 @@ async def btn_add_item(message: types.Message, state: FSMContext):
 @router.message(AddProductStates.waiting_for_name, F.text == "❌ Отмена")
 async def cancel_add_name(message: types.Message, state: FSMContext):
     await delete_user_message(message)
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    list_message_id = data.get("list_message_id")
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
+    if list_message_id:
+        await state.update_data(list_message_id=list_message_id)
     await message.answer(
         "❌ Добавление отменено.", reply_markup=get_list_menu_keyboard()
     )
@@ -509,7 +516,14 @@ async def process_product_name(message: types.Message, state: FSMContext):
 @router.message(AddProductStates.waiting_for_unit, F.text == "❌ Отмена")
 async def cancel_add_unit(message: types.Message, state: FSMContext):
     await delete_user_message(message)
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    list_message_id = data.get("list_message_id")
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
+    if list_message_id:
+        await state.update_data(list_message_id=list_message_id)
     await message.answer(
         "❌ Добавление отменено.", reply_markup=get_list_menu_keyboard()
     )
@@ -540,7 +554,14 @@ async def process_unit(message: types.Message, state: FSMContext):
 @router.message(AddProductStates.waiting_for_amount, F.text == "❌ Отмена")
 async def cancel_add_amount(message: types.Message, state: FSMContext):
     await delete_user_message(message)
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    list_message_id = data.get("list_message_id")
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
+    if list_message_id:
+        await state.update_data(list_message_id=list_message_id)
     await message.answer(
         "❌ Добавление отменено.", reply_markup=get_list_menu_keyboard()
     )
@@ -589,6 +610,8 @@ async def save_product(message: types.Message, state: FSMContext, amount, unit):
                 await update_item_quantity(db, existing.id, new_quantity)
                 text, keyboard = await build_list_message(db, room_id)
                 await state.clear()
+                if room_id:
+                    await state.update_data(room_id=room_id)
                 if list_message_id:
                     try:
                         await message.bot.edit_message_text(
@@ -614,6 +637,8 @@ async def save_product(message: types.Message, state: FSMContext, amount, unit):
         text, keyboard = await build_list_message(db, room_id)
 
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
     if list_message_id:
         try:
             await message.bot.edit_message_text(
@@ -1326,7 +1351,14 @@ async def callback_edit(callback: types.CallbackQuery, state: FSMContext):
 @router.message(EditProductStates.waiting_for_unit, F.text == "❌ Отмена")
 async def cancel_edit_unit(message: types.Message, state: FSMContext):
     await delete_user_message(message)
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    list_message_id = data.get("list_message_id")
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
+    if list_message_id:
+        await state.update_data(list_message_id=list_message_id)
     await message.answer(
         "❌ Редактирование отменено.", reply_markup=get_list_menu_keyboard()
     )
@@ -1357,7 +1389,14 @@ async def edit_process_unit(message: types.Message, state: FSMContext):
 @router.message(EditProductStates.waiting_for_amount, F.text == "❌ Отмена")
 async def cancel_edit_amount(message: types.Message, state: FSMContext):
     await delete_user_message(message)
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    list_message_id = data.get("list_message_id")
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
+    if list_message_id:
+        await state.update_data(list_message_id=list_message_id)
     await message.answer(
         "❌ Редактирование отменено.", reply_markup=get_list_menu_keyboard()
     )
@@ -1388,7 +1427,14 @@ async def save_edited_product(message: types.Message, state: FSMContext, amount,
     async with get_db() as db:
         await update_item_quantity(db, item_id, quantity)
 
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    list_message_id = data.get("list_message_id")
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
+    if list_message_id:
+        await state.update_data(list_message_id=list_message_id)
     await message.answer(
         f"✅ Количество обновлено.", reply_markup=get_list_menu_keyboard()
     )
@@ -1510,9 +1556,10 @@ async def callback_back_to_templates(callback: types.CallbackQuery, state: FSMCo
         await callback.answer("⛔ Доступ запрещён.", show_alert=True)
         return
 
-    await state.clear()
     data = await state.get_data()
     room_id = data.get("room_id")
+    await state.clear()
+    await state.update_data(room_id=room_id)
     async with get_db() as db:
         text, keyboard = await build_templates_message(db, room_id=room_id)
 
@@ -1564,7 +1611,11 @@ async def callback_new_template(callback: types.CallbackQuery, state: FSMContext
 @router.message(TemplateStates.waiting_for_name, F.text == "❌ Отмена")
 async def cancel_template_name(message: types.Message, state: FSMContext):
     await delete_user_message(message)
+    data = await state.get_data()
+    room_id = data.get("room_id")
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
     await message.answer(
         "❌ Создание шаблона отменено.", reply_markup=get_templates_menu_keyboard()
     )
@@ -1592,6 +1643,8 @@ async def process_template_name(message: types.Message, state: FSMContext):
         if template_items:
             await create_template_from_items(db, name, template_items, room_id=room_id)
             await state.clear()
+            if room_id:
+                await state.update_data(room_id=room_id)
             await message.answer(
                 f"✅ Шаблон '{name}' создан из {len(template_items)} товаров.",
                 reply_markup=get_main_keyboard(),
@@ -1615,7 +1668,10 @@ async def cancel_template_product_flow(message: types.Message, state: FSMContext
     await delete_user_message(message)
     data = await state.get_data()
     template_id = data.get("current_template_id") or data.get("template_id")
+    room_id = data.get("room_id")
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
     if template_id:
         await state.update_data(current_template_id=template_id)
         await message.answer(
@@ -1634,7 +1690,10 @@ async def finish_template_products(message: types.Message, state: FSMContext):
     await delete_user_message(message)
     data = await state.get_data()
     template_id = data.get("current_template_id") or data.get("template_id")
+    room_id = data.get("room_id")
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
     if template_id:
         await state.update_data(current_template_id=template_id)
         await message.answer(
@@ -1749,7 +1808,11 @@ async def callback_template_from_list(callback: types.CallbackQuery, state: FSMC
 @router.message(TemplateStates.waiting_for_rename, F.text == "❌ Отмена")
 async def cancel_rename_template(message: types.Message, state: FSMContext):
     await delete_user_message(message)
+    data = await state.get_data()
+    room_id = data.get("room_id")
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
     await message.answer(
         "❌ Переименование отменено.", reply_markup=get_template_manage_keyboard()
     )
@@ -1790,12 +1853,13 @@ async def btn_back(message: types.Message, state: FSMContext):
     await delete_user_message(message)
     data = await state.get_data()
     template_id = data.get("current_template_id")
+    room_id = data.get("room_id")
 
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
 
     if template_id:
-        data = await state.get_data()
-        room_id = data.get("room_id")
         async with get_db() as db:
             text, keyboard = await build_templates_message(db, room_id=room_id)
         await message.answer(text, reply_markup=keyboard)
@@ -2074,6 +2138,8 @@ async def btn_template_add_to_list(message: types.Message, state: FSMContext):
                 )
 
         await state.clear()
+        if room_id:
+            await state.update_data(room_id=room_id)
         await message.answer(
             f"✅ Добавлено {len(non_conflicts)} товаров.",
             reply_markup=get_main_keyboard(),
@@ -2130,6 +2196,7 @@ async def callback_replace_all_conflicts(
     non_conflicts = data.get("non_conflicts", [])
     user_display = data.get("user_display")
     room_id = data.get("room_id")
+    list_message_id = data.get("list_message_id")
 
     async with get_db() as db:
         for conflict in conflicts:
@@ -2150,6 +2217,8 @@ async def callback_replace_all_conflicts(
             )
 
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id, list_message_id=list_message_id)
     await callback.message.edit_text(
         f"✅ Шаблон добавлен к списку.\n\n"
         f"Заменено: {len(conflicts)}\n"
@@ -2168,6 +2237,7 @@ async def callback_keep_all_conflicts(callback: types.CallbackQuery, state: FSMC
     non_conflicts = data.get("non_conflicts", [])
     user_display = data.get("user_display")
     room_id = data.get("room_id")
+    list_message_id = data.get("list_message_id")
 
     async with get_db() as db:
         for item in non_conflicts:
@@ -2182,6 +2252,8 @@ async def callback_keep_all_conflicts(callback: types.CallbackQuery, state: FSMC
             )
 
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id, list_message_id=list_message_id)
     await callback.message.edit_text(
         f"✅ Шаблон добавлен к списку.\n\n"
         f"Оставлено без изменений: {len(conflicts)}\n"
@@ -2197,7 +2269,11 @@ async def callback_keep_all_conflicts(callback: types.CallbackQuery, state: FSMC
 async def callback_cancel_apply_template(
     callback: types.CallbackQuery, state: FSMContext
 ):
+    data = await state.get_data()
+    room_id = data.get("room_id")
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
     await callback.message.delete()
     await callback.answer("❌ Отменено")
 
@@ -2254,6 +2330,8 @@ async def callback_confirm_delete_template(
         text, keyboard = await build_templates_message(db, room_id=room_id)
 
     await state.clear()
+    if room_id:
+        await state.update_data(room_id=room_id)
     await callback.message.edit_text("🗑 Шаблон удалён.")
     await callback.message.answer(text, reply_markup=keyboard)
     await callback.message.answer(
@@ -2277,13 +2355,17 @@ async def save_edited_template_product(
     quantity = build_quantity(amount, unit)
 
     template_id = data.get("current_template_id")
+    room_id = data.get("room_id")
 
     async with get_db() as db:
         await update_template_item(db, item_id, quantity)
         text, keyboard = await build_template_detail_message(db, template_id)
 
     await state.clear()
-    await state.update_data(current_template_id=template_id)
+    if room_id:
+        await state.update_data(room_id=room_id)
+    if template_id:
+        await state.update_data(current_template_id=template_id)
     await message.answer(
         "✅ Количество обновлено.", reply_markup=get_template_manage_keyboard()
     )
@@ -2390,7 +2472,12 @@ async def process_room_name(message: types.Message, state: FSMContext):
         room = await create_room(db, name, user_id)
 
     if not room:
+        data = await state.get_data()
+        room_id = data.get("room_id")
+        room_name = data.get("room_name")
         await state.clear()
+        if room_id:
+            await state.update_data(room_id=room_id, room_name=room_name)
         await message.answer(
             "❌ Вы уже создали комнату.",
             reply_markup=get_main_keyboard(),
@@ -2398,6 +2485,7 @@ async def process_room_name(message: types.Message, state: FSMContext):
         return
 
     await state.clear()
+    await state.update_data(room_id=room.id, room_name=name)
     await message.answer(
         f"✅ Комната «{name}» создана!\n\nПригласите участников через «👤 Пригласить».",
         reply_markup=get_main_keyboard(),
@@ -2480,6 +2568,8 @@ async def process_invite_username(message: types.Message, state: FSMContext):
             target_all = await get_user_by_username_all(db, username)
             if not target_all:
                 await state.clear()
+                if room_id:
+                    await state.update_data(room_id=room_id, room_name=room_name)
                 await message.answer(
                     f"❌ Пользователь {username} не найден.\n"
                     "Убедитесь, что он запустил бота (/start).",
@@ -2488,6 +2578,8 @@ async def process_invite_username(message: types.Message, state: FSMContext):
                 return
             else:
                 await state.clear()
+                if room_id:
+                    await state.update_data(room_id=room_id, room_name=room_name)
                 await message.answer(
                     f"❌ Пользователь {username} ещё не одобрен администратором.",
                     reply_markup=get_main_keyboard(),
@@ -2697,6 +2789,7 @@ async def process_rename_room(message: types.Message, state: FSMContext):
 
     await state.update_data(room_name=new_name)
     await state.clear()
+    await state.update_data(room_id=room_id, room_name=new_name)
     await message.answer(
         f"✅ Комната переименована в «{new_name}».",
         reply_markup=get_main_keyboard(),
