@@ -330,6 +330,11 @@ async def _build_purchase_list(items: list, header: str) -> tuple:
     if row:
         keyboard.append(row)
 
+    purchased = [i for i in items if i.is_purchased]
+    if purchased:
+        names = ", ".join(format_item(i.name, i.quantity) for i in purchased)
+        text += f"\n✅ Купленные: {names}\n"
+
     return text, InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
 
 
