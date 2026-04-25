@@ -293,60 +293,51 @@ async def build_list_message(db, room_id: Optional[int] = None) -> tuple:
     header = (
         f"📋 Список покупок — 🏠 {room_name}\n\n"
         if room_name
-        else "📋 Список покупок:\n"
+        else "📋 Список покупок:\n\n"
     )
     text = header
     keyboard = []
 
     current_category = None
-    counter = 0
 
     for item in items:
         if item.is_purchased:
             continue
 
-        counter += 1
         item_category = item.category
 
         if item_category != current_category:
-            text += f"\n{get_category_name(item_category)}\n"
+            text += f"{get_category_name(item_category)}\n"
             current_category = item_category
 
         item_text = format_item(item.name, item.quantity)
-        adder = item.added_by_name or "Неизвестно"
-        text += f"{counter}. {item_text} (добавил: {adder})\n"
+        text += f"  {item_text}\n"
+        button_text = item_text[:24] + "…" if len(item_text) > 25 else item_text
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=f"✅ {counter}", callback_data=f"purchase_{item.id}"
+                    text=button_text, callback_data=f"purchase_{item.id}"
                 ),
-                InlineKeyboardButton(
-                    text=f"✏️ {counter}", callback_data=f"edit_{item.id}"
-                ),
-                InlineKeyboardButton(
-                    text=f"🗑 {counter}", callback_data=f"remove_{item.id}"
-                ),
+                InlineKeyboardButton(text="✏️", callback_data=f"edit_{item.id}"),
+                InlineKeyboardButton(text="🗑", callback_data=f"remove_{item.id}"),
             ]
         )
 
     purchased_items = [item for item in items if item.is_purchased]
+    if purchased_items:
+        text += "\n"
     for item in purchased_items:
-        counter += 1
         item_text = format_item(item.name, item.quantity)
-        purchaser = item.purchased_by_name or "Неизвестно"
-        text += f"\n✅ {counter}. {item_text} (купил: {purchaser})\n"
+        text += f"  ✅ {item_text}\n"
+        button_text = item_text[:24] + "…" if len(item_text) > 25 else item_text
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=f"↩️ {counter}", callback_data=f"undo_{item.id}"
+                    text=f"↩️ {button_text}", callback_data=f"undo_{item.id}"
                 ),
-                InlineKeyboardButton(
-                    text=f"🗑 {counter}", callback_data=f"remove_{item.id}"
-                ),
+                InlineKeyboardButton(text="🗑", callback_data=f"remove_{item.id}"),
             ]
         )
-
-    text += "\n👇 Нажмите кнопку под продуктом"
 
     return text, InlineKeyboardMarkup(inline_keyboard=keyboard)
 
