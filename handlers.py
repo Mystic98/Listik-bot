@@ -196,12 +196,9 @@ def get_amount_keyboard() -> ReplyKeyboardMarkup:
 
 def get_list_menu_keyboard() -> ReplyKeyboardMarkup:
     keyboard = [
-        [
-            KeyboardButton(text="➕ Добавить товар"),
-            KeyboardButton(text="➕ Добавить из шаблона"),
-        ],
-        [KeyboardButton(text="📋 Создать шаблон из списка")],
-        [KeyboardButton(text="🗑 Очистить купленные")],
+        [KeyboardButton(text="🛒 Покупка"), KeyboardButton(text="✏️ Правка")],
+        [KeyboardButton(text="➕ Добавить"), KeyboardButton(text="📥 Из шаблона")],
+        [KeyboardButton(text="📋 Шаблон из списка"), KeyboardButton(text="🗑 Очистить")],
         [KeyboardButton(text="◀️ Назад")],
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
@@ -275,7 +272,9 @@ async def check_access(user_id: int) -> bool:
         return await is_user_allowed(db, user_id)
 
 
-async def build_list_message(db, room_id: Optional[int] = None) -> tuple:
+async def build_list_message(
+    db, room_id: Optional[int] = None, mode: str = "purchase"
+) -> tuple:
     items = await get_all_items_ordered(db, room_id=room_id)
     room_name = ""
     if room_id:
@@ -290,56 +289,91 @@ async def build_list_message(db, room_id: Optional[int] = None) -> tuple:
         )
         return f"{header}Список пуст.", None
 
+    mode_label = " (правка)" if mode == "edit" else ""
     header = (
-        f"📋 Список покупок — 🏠 {room_name}\n\n"
+        f"📋 Список покупок — 🏠 {room_name}{mode_label}\n\n"
         if room_name
-        else "📋 Список покупок:\n\n"
+        else f"📋 Список покупок:{mode_label}\n\n"
     )
+
+    if mode == "purchase":
+        return await _build_purchase_list(items, header)
+    return await _build_edit_list(items, header)
+
+
+async def _build_purchase_list(items: list, header: str) -> tuple:
     text = header
     keyboard = []
-
     current_category = None
 
-    for item in items:
-        if item.is_purchased:
-            continue
+    pending = [i for i in items if not i.is_purchased]
+    if not pending:
+        return f"{header}Все куплено! 🎉", None
 
-        item_category = item.category
-
-        if item_category != current_category:
-            text += f"{get_category_name(item_category)}\n"
-            current_category = item_category
-
+    for item in pending:
+        if item.category != current_category:
+            text += f"{get_category_name(item.category)}\n"
+            current_category = item.category
         item_text = format_item(item.name, item.quantity)
         text += f"  {item_text}\n"
-        button_text = item_text[:24] + "…" if len(item_text) > 25 else item_text
+
+    row = []
+    for item in pending:
+        item_text = format_item(item.name, item.quantity)
+        btn_text = item_text[:24] + "…" if len(item_text) > 25 else item_text
+        row.append(
+            InlineKeyboardButton(text=btn_text, callback_data=f"purchase_{item.id}")
+        )
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    return text, InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
+
+
+async def _build_edit_list(items: list, header: str) -> tuple:
+    text = header
+    keyboard = []
+    current_category = None
+
+    pending = [i for i in items if not i.is_purchased]
+    purchased = [i for i in items if i.is_purchased]
+
+    for item in pending:
+        if item.category != current_category:
+            text += f"{get_category_name(item.category)}\n"
+            current_category = item.category
+        item_text = format_item(item.name, item.quantity)
+        text += f"  {item_text}\n"
+        btn_text = item_text[:24] + "…" if len(item_text) > 25 else item_text
         keyboard.append(
             [
                 InlineKeyboardButton(
-                    text=button_text, callback_data=f"purchase_{item.id}"
+                    text=btn_text, callback_data=f"purchase_{item.id}"
                 ),
                 InlineKeyboardButton(text="✏️", callback_data=f"edit_{item.id}"),
                 InlineKeyboardButton(text="🗑", callback_data=f"remove_{item.id}"),
             ]
         )
 
-    purchased_items = [item for item in items if item.is_purchased]
-    if purchased_items:
-        text += "\n"
-    for item in purchased_items:
-        item_text = format_item(item.name, item.quantity)
-        text += f"  ✅ {item_text}\n"
-        button_text = item_text[:24] + "…" if len(item_text) > 25 else item_text
-        keyboard.append(
-            [
-                InlineKeyboardButton(
-                    text=f"↩️ {button_text}", callback_data=f"undo_{item.id}"
-                ),
-                InlineKeyboardButton(text="🗑", callback_data=f"remove_{item.id}"),
-            ]
-        )
+    if purchased:
+        text += "\n✅ Купленные:\n"
+        for item in purchased:
+            item_text = format_item(item.name, item.quantity)
+            text += f"  {item_text}\n"
+            btn_text = item_text[:24] + "…" if len(item_text) > 25 else item_text
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"↩️ {btn_text}", callback_data=f"undo_{item.id}"
+                    ),
+                    InlineKeyboardButton(text="🗑", callback_data=f"remove_{item.id}"),
+                ]
+            )
 
-    return text, InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return text, InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
 
 
 async def build_pending_message(db) -> tuple:
@@ -460,7 +494,7 @@ async def btn_help(message: types.Message):
     await cmd_start(message)
 
 
-@router.message(F.text == "➕ Добавить товар")
+@router.message(F.text == "➕ Добавить")
 async def btn_add_item(message: types.Message, state: FSMContext):
     await delete_user_message(message)
     if not await check_access(message.from_user.id):
@@ -576,6 +610,7 @@ async def save_product(message: types.Message, state: FSMContext, amount, unit):
     name = data.get("product_name")
     list_message_id = data.get("list_message_id")
     room_id = data.get("room_id")
+    mode = data.get("list_mode", "purchase")
     user = message.from_user
     user_display = get_user_display_name(user)
 
@@ -599,7 +634,7 @@ async def save_product(message: types.Message, state: FSMContext, amount, unit):
             new_quantity = combine_quantities(existing.quantity, quantity)
             if new_quantity:
                 await update_item_quantity(db, existing.id, new_quantity)
-                text, keyboard = await build_list_message(db, room_id)
+                text, keyboard = await build_list_message(db, room_id, mode=mode)
                 await state.clear()
                 if room_id:
                     await state.update_data(room_id=room_id)
@@ -625,7 +660,7 @@ async def save_product(message: types.Message, state: FSMContext, amount, unit):
         item_id = await add_item(
             db, name, quantity, user.id, user_display, category, room_id=room_id
         )
-        text, keyboard = await build_list_message(db, room_id)
+        text, keyboard = await build_list_message(db, room_id, mode=mode)
 
     await state.clear()
     if room_id:
@@ -668,9 +703,9 @@ async def btn_list_menu(message: types.Message, state: FSMContext):
     data = await state.get_data()
     room_id = data.get("room_id")
     await state.clear()
-    await state.update_data(room_id=room_id)
+    await state.update_data(room_id=room_id, list_mode="purchase")
     async with get_db() as db:
-        text, keyboard = await build_list_message(db, room_id)
+        text, keyboard = await build_list_message(db, room_id, mode="purchase")
 
     if keyboard:
         sent = await message.answer(text, reply_markup=keyboard)
@@ -680,7 +715,59 @@ async def btn_list_menu(message: types.Message, state: FSMContext):
     await message.answer("📋 Меню списка", reply_markup=get_list_menu_keyboard())
 
 
-@router.message(F.text == "➕ Добавить из шаблона")
+async def _refresh_list(message: types.Message, state: FSMContext, mode: str):
+    data = await state.get_data()
+    room_id = data.get("room_id")
+    list_message_id = data.get("list_message_id")
+
+    async with get_db() as db:
+        text, keyboard = await build_list_message(db, room_id, mode=mode)
+
+    if list_message_id:
+        try:
+            await message.bot.edit_message_text(
+                text,
+                chat_id=message.chat.id,
+                message_id=list_message_id,
+                reply_markup=keyboard,
+            )
+        except Exception:
+            if keyboard:
+                sent = await message.answer(text, reply_markup=keyboard)
+                await state.update_data(list_message_id=sent.message_id)
+            else:
+                await message.answer(text)
+    else:
+        if keyboard:
+            sent = await message.answer(text, reply_markup=keyboard)
+            await state.update_data(list_message_id=sent.message_id)
+        else:
+            await message.answer(text)
+
+
+@router.message(F.text == "🛒 Покупка")
+async def btn_purchase_mode(message: types.Message, state: FSMContext):
+    await delete_user_message(message)
+    if not await check_access(message.from_user.id):
+        await message.answer("⛔ Доступ запрещён.")
+        return
+
+    await state.update_data(list_mode="purchase")
+    await _refresh_list(message, state, "purchase")
+
+
+@router.message(F.text == "✏️ Правка")
+async def btn_edit_mode(message: types.Message, state: FSMContext):
+    await delete_user_message(message)
+    if not await check_access(message.from_user.id):
+        await message.answer("⛔ Доступ запрещён.")
+        return
+
+    await state.update_data(list_mode="edit")
+    await _refresh_list(message, state, "edit")
+
+
+@router.message(F.text == "📥 Из шаблона")
 async def btn_add_template_to_list(message: types.Message, state: FSMContext):
     await delete_user_message(message)
     if not await check_access(message.from_user.id):
@@ -831,7 +918,7 @@ async def callback_add_template_to_list(
     await callback.answer()
 
 
-@router.message(F.text == "📋 Создать шаблон из списка")
+@router.message(F.text == "📋 Шаблон из списка")
 async def btn_create_template_from_list(message: types.Message, state: FSMContext):
     await delete_user_message(message)
     if not await check_access(message.from_user.id):
@@ -859,7 +946,7 @@ async def btn_create_template_from_list(message: types.Message, state: FSMContex
     )
 
 
-@router.message(F.text == "🗑 Очистить купленные")
+@router.message(F.text == "🗑 Очистить")
 async def cmd_clear(message: types.Message, state: FSMContext):
     await delete_user_message(message)
     user = message.from_user
@@ -892,10 +979,11 @@ async def callback_confirm_clear(callback: types.CallbackQuery, state: FSMContex
     data = await state.get_data()
     list_message_id = data.get("list_message_id")
     room_id = data.get("room_id")
+    mode = data.get("list_mode", "purchase")
 
     async with get_db() as db:
         count = await clear_purchased_items(db, room_id=room_id)
-        text, keyboard = await build_list_message(db, room_id)
+        text, keyboard = await build_list_message(db, room_id, mode=mode)
 
     if list_message_id:
         try:
@@ -1118,8 +1206,9 @@ async def callback_set_category(callback: types.CallbackQuery, state: FSMContext
         data = await state.get_data()
         list_message_id = data.get("list_message_id")
         room_id = data.get("room_id")
+        mode = data.get("list_mode", "purchase")
         if list_message_id:
-            text, keyboard = await build_list_message(db, room_id)
+            text, keyboard = await build_list_message(db, room_id, mode=mode)
             try:
                 await callback.bot.edit_message_text(
                     text,
@@ -1177,12 +1266,13 @@ async def callback_purchase(callback: types.CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
     room_id = data.get("room_id")
+    mode = data.get("list_mode", "purchase")
 
     async with get_db() as db:
         success = await mark_as_purchased(db, item_id, user.id, user_display)
 
         if success:
-            text, keyboard = await build_list_message(db, room_id)
+            text, keyboard = await build_list_message(db, room_id, mode=mode)
             try:
                 await callback.message.edit_text(text, reply_markup=keyboard)
             except Exception:
@@ -1206,12 +1296,13 @@ async def callback_undo(callback: types.CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
     room_id = data.get("room_id")
+    mode = data.get("list_mode", "purchase")
 
     async with get_db() as db:
         success = await unmark_purchased(db, item_id)
 
         if success:
-            text, keyboard = await build_list_message(db, room_id)
+            text, keyboard = await build_list_message(db, room_id, mode=mode)
             try:
                 await callback.message.edit_text(text, reply_markup=keyboard)
             except Exception:
@@ -1233,12 +1324,13 @@ async def callback_remove(callback: types.CallbackQuery, state: FSMContext):
 
     data = await state.get_data()
     room_id = data.get("room_id")
+    mode = data.get("list_mode", "purchase")
 
     async with get_db() as db:
         success = await remove_item(db, item_id)
 
         if success:
-            text, keyboard = await build_list_message(db, room_id)
+            text, keyboard = await build_list_message(db, room_id, mode=mode)
             try:
                 await callback.message.edit_text(text, reply_markup=keyboard)
             except Exception:
