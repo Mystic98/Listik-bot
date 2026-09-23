@@ -5,11 +5,13 @@ import os
 import traceback
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher
-from aiogram.types import ErrorEvent
+from aiogram.types import ErrorEvent, MenuButtonWebApp, WebAppInfo
+import uvicorn
 
 from config import settings
 from handlers import router
 from database import get_db, get_approved_telegram_ids
+from webapp.app import app as web_app
 
 LOG_DIR = os.environ.get("LOG_DIR", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -86,9 +88,32 @@ async def main():
     dp.error.register(errors_handler)
     dp.include_router(router)
 
+    if settings.mini_app_url:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="Открыть список",
+                web_app=WebAppInfo(url=settings.mini_app_url),
+            )
+        )
+
     asyncio.create_task(reminder_scheduler(bot))
 
     logging.info("Бот запущен")
+
+    if settings.webapp_enabled:
+        web_server = uvicorn.Server(
+            uvicorn.Config(
+                web_app,
+                host=settings.mini_app_host,
+                port=settings.mini_app_port,
+                log_level="info",
+            )
+        )
+        await asyncio.gather(
+            dp.start_polling(bot, allowed_updates=["message", "callback_query"]),
+            web_server.serve(),
+        )
+        return
 
     await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
 

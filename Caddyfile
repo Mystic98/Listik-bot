@@ -1,0 +1,3 @@
+{$PUBLIC_HOST:72.56.70.155} {
+    reverse_proxy bot:8080
+}

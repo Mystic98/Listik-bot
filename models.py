@@ -33,6 +33,7 @@ class Item(BaseModel):
     category: str = "other"
     created_at: Optional[datetime] = None
     purchased_at: Optional[datetime] = None
+    version: int = 1
 
     @field_validator("name")
     @classmethod

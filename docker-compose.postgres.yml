@@ -1,0 +1,50 @@
+services:
+  bot:
+    environment:
+      DATABASE_URL: postgresql+asyncpg://listik:${POSTGRES_PASSWORD}@postgres:5432/listik
+      WEBAPP_ENABLED: "true"
+      MINI_APP_HOST: 0.0.0.0
+      MINI_APP_PORT: 8080
+      MINI_APP_URL: ${MINI_APP_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: grocery-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: listik
+      POSTGRES_USER: listik
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U listik -d listik"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: grocery-caddy
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-72.56.70.155}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - bot
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

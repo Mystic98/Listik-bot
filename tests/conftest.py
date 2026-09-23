@@ -19,7 +19,8 @@ async def db():
             full_name TEXT,
             added_by INTEGER,
             is_approved BOOLEAN DEFAULT FALSE,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            active_room_id INTEGER DEFAULT NULL
         )
     """)
 
@@ -36,7 +37,8 @@ async def db():
             category TEXT DEFAULT 'other',
             room_id INTEGER DEFAULT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            purchased_at DATETIME
+            purchased_at DATETIME,
+            version INTEGER NOT NULL DEFAULT 1
         )
     """)
 

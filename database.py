@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from config import settings
+from database_backend import PostgresConnection, get_postgres_pool
 from models import (
     User,
     Item,
@@ -13,7 +14,7 @@ from models import (
     Room,
     RoomMember,
 )
-from utils import extract_quantity_parts, get_unit_group
+from utils import combine_quantities, extract_quantity_parts, get_unit_group
 
 
 async def _init_tables(db: aiosqlite.Connection) -> None:
@@ -40,7 +41,8 @@ async def _init_tables(db: aiosqlite.Connection) -> None:
             purchased_by INTEGER,
             purchased_by_name TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            purchased_at DATETIME
+            purchased_at DATETIME,
+            version INTEGER NOT NULL DEFAULT 1
         )
     """)
 
@@ -91,6 +93,14 @@ async def _init_tables(db: aiosqlite.Connection) -> None:
 
     try:
         await db.execute("ALTER TABLE items ADD COLUMN category TEXT DEFAULT 'other'")
+        await db.commit()
+    except Exception:
+        pass
+
+    try:
+        await db.execute(
+            "ALTER TABLE items ADD COLUMN version INTEGER NOT NULL DEFAULT 1"
+        )
         await db.commit()
     except Exception:
         pass
@@ -168,6 +178,20 @@ async def _init_tables(db: aiosqlite.Connection) -> None:
 
 @asynccontextmanager
 async def get_db(db_path: Optional[str] = None):
+    if db_path is None and settings.database_url:
+        pool = await get_postgres_pool(settings.database_url)
+        async with pool.acquire() as connection:
+            transaction = connection.transaction()
+            await transaction.start()
+            try:
+                yield PostgresConnection(connection)
+            except Exception:
+                await transaction.rollback()
+                raise
+            else:
+                await transaction.commit()
+        return
+
     if db_path is None:
         db_path = settings.database_path
     db = await aiosqlite.connect(db_path)
@@ -190,8 +214,13 @@ async def add_user(
 ) -> None:
     await db.execute(
         """
-        INSERT OR REPLACE INTO users (telegram_id, username, full_name, added_by, is_approved)
+        INSERT INTO users (telegram_id, username, full_name, added_by, is_approved)
         VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (telegram_id) DO UPDATE SET
+            username = excluded.username,
+            full_name = excluded.full_name,
+            added_by = excluded.added_by,
+            is_approved = excluded.is_approved
         """,
         (telegram_id, username, full_name, added_by, approved),
     )
@@ -313,12 +342,14 @@ async def add_item(
         """
         INSERT INTO items (name, quantity, added_by, added_by_name, category, room_id)
         VALUES (?, ?, ?, ?, ?, ?)
+        RETURNING id
         """,
         (name, quantity, added_by, added_by_name, category, room_id),
     )
+    row = await cursor.fetchone()
     await db.commit()
-    assert cursor.lastrowid is not None
-    return cursor.lastrowid
+    assert row is not None
+    return int(row["id"])
 
 
 async def get_all_items(db: aiosqlite.Connection) -> List[Item]:
@@ -357,6 +388,17 @@ async def get_item_by_id(db: aiosqlite.Connection, item_id: int) -> Optional[Ite
     return Item.model_validate(dict(row)) if row else None
 
 
+async def get_item_by_id_in_room(
+    db: aiosqlite.Connection, item_id: int, room_id: int
+) -> Optional[Item]:
+    cursor = await db.execute(
+        "SELECT * FROM items WHERE id = ? AND room_id = ?",
+        (item_id, room_id),
+    )
+    row = await cursor.fetchone()
+    return Item.model_validate(dict(row)) if row else None
+
+
 async def mark_as_purchased(
     db: aiosqlite.Connection, item_id: int, purchased_by: int, purchased_by_name: str
 ) -> bool:
@@ -366,10 +408,34 @@ async def mark_as_purchased(
         SET is_purchased = TRUE, 
             purchased_by = ?, 
             purchased_by_name = ?,
-            purchased_at = CURRENT_TIMESTAMP
+            purchased_at = CURRENT_TIMESTAMP,
+            version = version + 1
         WHERE id = ? AND is_purchased = FALSE
         """,
         (purchased_by, purchased_by_name, item_id),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def mark_as_purchased_in_room(
+    db: aiosqlite.Connection,
+    item_id: int,
+    room_id: int,
+    purchased_by: int,
+    purchased_by_name: str,
+) -> bool:
+    cursor = await db.execute(
+        """
+        UPDATE items
+        SET is_purchased = TRUE,
+            purchased_by = ?,
+            purchased_by_name = ?,
+            purchased_at = CURRENT_TIMESTAMP,
+            version = version + 1
+        WHERE id = ? AND room_id = ? AND is_purchased = FALSE
+        """,
+        (purchased_by, purchased_by_name, item_id, room_id),
     )
     await db.commit()
     return cursor.rowcount > 0
@@ -382,10 +448,81 @@ async def unmark_purchased(db: aiosqlite.Connection, item_id: int) -> bool:
         SET is_purchased = FALSE, 
             purchased_by = NULL, 
             purchased_by_name = NULL,
-            purchased_at = NULL
+            purchased_at = NULL,
+            version = version + 1
         WHERE id = ? AND is_purchased = TRUE
         """,
         (item_id,),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def unmark_purchased_in_room(
+    db: aiosqlite.Connection, item_id: int, room_id: int
+) -> bool:
+    cursor = await db.execute(
+        """
+        UPDATE items
+        SET is_purchased = FALSE,
+            purchased_by = NULL,
+            purchased_by_name = NULL,
+            purchased_at = NULL,
+            version = version + 1
+        WHERE id = ? AND room_id = ? AND is_purchased = TRUE
+        """,
+        (item_id, room_id),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def add_or_merge_item_in_room(
+    db: aiosqlite.Connection,
+    name: str,
+    quantity: Optional[str],
+    added_by: int,
+    added_by_name: str,
+    category: str,
+    room_id: int,
+) -> tuple[int, bool]:
+    group = get_unit_group(extract_quantity_parts(quantity)[1] if quantity else None)
+    existing = await find_pending_item_in_unit_group(db, name, group, room_id=room_id)
+    if existing:
+        merged_quantity = combine_quantities(existing.quantity, quantity)
+        if merged_quantity:
+            cursor = await db.execute(
+                """
+                UPDATE items
+                SET quantity = ?, version = version + 1
+                WHERE id = ? AND room_id = ? AND is_purchased = FALSE
+                """,
+                (merged_quantity, existing.id, room_id),
+            )
+            await db.commit()
+            if cursor.rowcount > 0:
+                return existing.id, True
+
+    return (
+        await add_item(
+            db,
+            name,
+            quantity,
+            added_by,
+            added_by_name,
+            category,
+            room_id=room_id,
+        ),
+        False,
+    )
+
+
+async def update_item_category_in_room(
+    db: aiosqlite.Connection, item_id: int, room_id: int, category: str
+) -> bool:
+    cursor = await db.execute(
+        "UPDATE items SET category = ?, version = version + 1 WHERE id = ? AND room_id = ?",
+        (category, item_id, room_id),
     )
     await db.commit()
     return cursor.rowcount > 0
@@ -465,8 +602,42 @@ async def update_item_quantity(
     db: aiosqlite.Connection, item_id: int, new_quantity: Optional[str]
 ) -> bool:
     cursor = await db.execute(
-        "UPDATE items SET quantity = ? WHERE id = ?",
+        "UPDATE items SET quantity = ?, version = version + 1 WHERE id = ?",
         (new_quantity, item_id),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def update_item_in_room(
+    db: aiosqlite.Connection,
+    item_id: int,
+    room_id: int,
+    name: str,
+    quantity: Optional[str],
+    category: str,
+    expected_version: int,
+) -> Optional[Item]:
+    cursor = await db.execute(
+        """
+        UPDATE items
+        SET name = ?, quantity = ?, category = ?, version = version + 1
+        WHERE id = ? AND room_id = ? AND version = ?
+        """,
+        (name, quantity, category, item_id, room_id, expected_version),
+    )
+    await db.commit()
+    if cursor.rowcount == 0:
+        return None
+    return await get_item_by_id_in_room(db, item_id, room_id)
+
+
+async def remove_item_in_room(
+    db: aiosqlite.Connection, item_id: int, room_id: int
+) -> bool:
+    cursor = await db.execute(
+        "DELETE FROM items WHERE id = ? AND room_id = ?",
+        (item_id, room_id),
     )
     await db.commit()
     return cursor.rowcount > 0
@@ -528,12 +699,13 @@ async def create_template(
     db: aiosqlite.Connection, name: str, room_id: Optional[int] = None
 ) -> int:
     cursor = await db.execute(
-        "INSERT INTO templates (name, room_id) VALUES (?, ?)",
+        "INSERT INTO templates (name, room_id) VALUES (?, ?) RETURNING id",
         (name, room_id),
     )
+    row = await cursor.fetchone()
     await db.commit()
-    assert cursor.lastrowid is not None
-    return cursor.lastrowid
+    assert row is not None
+    return int(row["id"])
 
 
 async def get_all_templates(
@@ -624,12 +796,13 @@ async def add_item_to_template(
     category: str = "other",
 ) -> int:
     cursor = await db.execute(
-        "INSERT INTO template_items (template_id, name, quantity, category) VALUES (?, ?, ?, ?)",
+        "INSERT INTO template_items (template_id, name, quantity, category) VALUES (?, ?, ?, ?) RETURNING id",
         (template_id, name, quantity, category),
     )
+    row = await cursor.fetchone()
     await db.commit()
-    assert cursor.lastrowid is not None
-    return cursor.lastrowid
+    assert row is not None
+    return int(row["id"])
 
 
 async def get_template_items(
@@ -736,8 +909,11 @@ async def save_product_category(
 ) -> None:
     await db.execute(
         """
-        INSERT OR REPLACE INTO product_categories (name, category, updated_at)
+        INSERT INTO product_categories (name, category, updated_at)
         VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (name) DO UPDATE SET
+            category = excluded.category,
+            updated_at = CURRENT_TIMESTAMP
         """,
         (name.lower(), category),
     )
@@ -840,12 +1016,13 @@ async def create_room(
         return None
 
     cursor = await db.execute(
-        "INSERT INTO rooms (name, creator_id) VALUES (?, ?)",
+        "INSERT INTO rooms (name, creator_id) VALUES (?, ?) RETURNING id",
         (name, creator_id),
     )
+    row = await cursor.fetchone()
     await db.commit()
-    room_id = cursor.lastrowid
-    assert room_id is not None
+    assert row is not None
+    room_id = int(row["id"])
 
     await db.execute(
         "INSERT INTO room_members (room_id, telegram_id, role) VALUES (?, ?, 'creator')",
@@ -921,7 +1098,10 @@ async def add_room_member(
     db: aiosqlite.Connection, room_id: int, telegram_id: int
 ) -> None:
     await db.execute(
-        "INSERT OR IGNORE INTO room_members (room_id, telegram_id, role) VALUES (?, ?, 'member')",
+        """
+        INSERT INTO room_members (room_id, telegram_id, role) VALUES (?, ?, 'member')
+        ON CONFLICT (room_id, telegram_id) DO NOTHING
+        """,
         (room_id, telegram_id),
     )
     await db.commit()

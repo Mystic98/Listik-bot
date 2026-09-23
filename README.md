@@ -19,7 +19,7 @@
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Установить зависимости
-uv sync
+uv sync --all-extras
 
 # Создать .env из примера
 cp .env.example .env
@@ -27,6 +27,14 @@ cp .env.example .env
 
 # Запустить
 uv run python bot.py
+```
+
+Для разработки интерфейса Mini App:
+
+```bash
+cd frontend
+npm ci
+npm run dev
 ```
 
 ## Запуск через Docker
@@ -49,6 +57,16 @@ nano .env  # Заполнить BOT_TOKEN и ADMIN_ID
 # Запустить
 docker compose up -d
 ```
+
+### Запуск с PostgreSQL и Mini App
+
+```bash
+cp .env.example .env
+# Заполнить BOT_TOKEN, ADMIN_ID, POSTGRES_PASSWORD и MINI_APP_URL
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --build
+```
+
+При запуске контейнера миграции Alembic применяются автоматически. `MINI_APP_URL` должен быть доступен по HTTPS; доменное имя не обязательно, если используется HTTPS на публичном IP.
 
 ### Полезные команды
 
@@ -76,7 +94,12 @@ docker compose up -d --build    # Пересобрать и запустить
 |-----------|-------------|----------|-------------|
 | `BOT_TOKEN` | Да | Токен Telegram бота | — |
 | `ADMIN_ID` | Да | Telegram ID администратора | — |
-| `DATABASE_PATH` | Нет | Путь к файлу БД | `/app/data/grocery.db` |
+| `DATABASE_PATH` | Нет | Путь к SQLite-файлу в legacy-режиме | `/app/data/grocery.db` |
+| `DATABASE_URL` | Нет | PostgreSQL URL; при заполнении становится источником данных | — |
+| `WEBAPP_ENABLED` | Нет | Запустить FastAPI/WebSocket рядом с ботом | `false` |
+| `MINI_APP_URL` | Нет | HTTPS-адрес Mini App для кнопки меню Telegram | — |
+| `MINI_APP_HOST` | Нет | Адрес HTTP-сервера Mini App | `0.0.0.0` |
+| `MINI_APP_PORT` | Нет | Порт HTTP-сервера Mini App | `8080` |
 | `LOG_DIR` | Нет | Папка для логов | `logs` |
 
 ## Команды
@@ -201,12 +224,16 @@ docker compose up -d --build
 ```
 ├── bot.py            # Точка входа, планировщик напоминаний
 ├── config.py         # Конфигурация (pydantic-settings)
-├── database.py       # SQLite операции (aiosqlite)
+├── database.py       # Общий слой операций данных
+├── database_backend.py # PostgreSQL-совместимый адаптер
 ├── handlers.py       # Обработчики команд и callback
 ├── states.py         # FSM состояния
 ├── utils.py          # Парсинг количества, конвертация единиц
 ├── categories.py     # Категории, ключевые слова, нечёткий поиск
 ├── models.py         # Pydantic модели (User, Item, Template)
+├── webapp/           # FastAPI API, Telegram auth и WebSocket
+├── frontend/         # React + Vite Mini App
+├── migrations/       # Alembic-схема PostgreSQL
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .github/workflows/  # CI/CD (GitHub Actions)

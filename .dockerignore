@@ -15,7 +15,8 @@ build/
 data/
 logs/
 tests/
-.pytest_cache/
 .ruff_cache/
 AGENTS.md
 README.md
+frontend/node_modules/
+frontend/dist/
