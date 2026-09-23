@@ -179,44 +179,40 @@ uv run pytest
 
 ## CI/CD
 
-Автоматическое тестирование и деплой при пуше в `main`.
+Workflow находится в `.github/workflows/ci-cd.yml`.
 
-### CI (тесты)
+CI запускается для push и pull request в `main` и `feature/mini-app-migration`:
 
-Каждый push/PR в main запускает pytest с проверкой покрытия (>=60%).
+- устанавливает Python-зависимости через `uv`;
+- запускает backend-тесты с проверкой покрытия не ниже 60%;
+- проверяет типы и собирает frontend;
+- проверяет сборку Docker-образа.
 
-### CD (деплой)
+CD запускается после успешного CI при push в текущую рабочую ветку `feature/mini-app-migration`:
 
-Каждый push в main автоматически деплоит бота на VPS через SSH.
+- подключается к VPS по SSH;
+- выполняет fast-forward обновление репозитория;
+- пересобирает и перезапускает PostgreSQL, бота и Caddy;
+- проверяет `/healthz`.
 
-### Настройка
-
-1. Сгенерировать SSH-ключ:
-   ```bash
-   ssh-keygen -t ed25519 -f ~/.ssh/deploy_key -N ""
-   ```
-
-2. Публичный ключ добавить на VPS в `~/.ssh/authorized_keys`:
-   ```bash
-   ssh-copy-id -i ~/.ssh/deploy_key.pub root@IP_VPS
-   ```
-
-3. В GitHub -> Settings -> Secrets and variables -> Actions -> New repository secret:
+Для CD в настройках GitHub-репозитория нужно добавить secrets:
 
 | Secret | Значение |
 |--------|----------|
-| `VPS_HOST` | IP адрес VPS |
-| `VPS_USER` | SSH пользователь (root) |
-| `VPS_SSH_KEY` | Содержимое приватного ключа `~/.ssh/deploy_key` |
-| `VPS_PATH` | Путь к проекту на VPS |
+| `VPS_HOST` | `72.56.70.155` |
+| `VPS_USER` | `root` |
+| `VPS_SSH_KEY` | Приватный SSH-ключ для подключения к VPS |
+| `VPS_KNOWN_HOSTS` | Результат `ssh-keyscan -H 72.56.70.155` |
+| `VPS_PATH` | `/root/Listik-bot` |
 
-### Ручной деплой
+После переноса продакшена на `main` ветку деплоя нужно будет заменить в workflow на `main`.
+
+Ручной деплой на VPS:
 
 ```bash
-ssh root@IP_VPS
-cd /путь/к/проекту
-git pull origin main
-docker compose up -d --build
+cd /root/Listik-bot
+git pull --ff-only origin feature/mini-app-migration
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --build
 ```
 
 ## Структура проекта
