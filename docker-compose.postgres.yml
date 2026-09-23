@@ -39,10 +39,19 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
       - bot
+
+  certbot:
+    image: certbot/certbot:v5.4.0
+    profiles: ["certbot"]
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
 
 volumes:
   postgres-data:

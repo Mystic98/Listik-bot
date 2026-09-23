@@ -1,0 +1,4 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+0 */6 * * * root /root/Listik-bot/scripts/renew-cert.sh >> /var/log/listik-certbot-renew.log 2>&1

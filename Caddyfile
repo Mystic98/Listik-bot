@@ -1,3 +1,15 @@
-{$PUBLIC_HOST:72.56.70.155} {
+:80 {
+    handle /.well-known/acme-challenge/* {
+        root * /var/www/certbot
+        file_server
+    }
+
+    handle {
+        redir https://{$PUBLIC_HOST:72.56.70.155}{uri} permanent
+    }
+}
+
+:443 {
+    tls /etc/letsencrypt/live/72.56.70.155/fullchain.pem /etc/letsencrypt/live/72.56.70.155/privkey.pem
     reverse_proxy bot:8080
 }
