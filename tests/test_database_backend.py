@@ -1,6 +1,10 @@
 import pytest
 
-from database_backend import PostgresConnection, _replace_placeholders
+from database_backend import (
+    PostgresConnection,
+    _normalize_database_url,
+    _replace_placeholders,
+)
 
 
 class FakeAsyncpgConnection:
@@ -50,3 +54,24 @@ async def test_postgres_connection_handles_returning_and_rowcount() -> None:
     assert connection.execute_calls == [
         ("UPDATE items SET name = $1 WHERE id = $2", ("сыр", 42))
     ]
+
+
+@pytest.mark.parametrize(
+    ("database_url", "expected"),
+    [
+        (
+            "postgresql+asyncpg://listik:secret@postgres:5432/listik",
+            "postgresql://listik:secret@postgres:5432/listik",
+        ),
+        (
+            "postgres+asyncpg://listik:secret@postgres:5432/listik",
+            "postgres://listik:secret@postgres:5432/listik",
+        ),
+        (
+            "postgresql://listik:secret@postgres:5432/listik",
+            "postgresql://listik:secret@postgres:5432/listik",
+        ),
+    ],
+)
+def test_normalize_database_url_for_asyncpg(database_url: str, expected: str) -> None:
+    assert _normalize_database_url(database_url) == expected

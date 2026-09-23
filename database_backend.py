@@ -65,6 +65,14 @@ def _replace_placeholders(query: str) -> str:
     return re.sub(r"\?", replace, query)
 
 
+def _normalize_database_url(database_url: str) -> str:
+    if database_url.startswith("postgresql+asyncpg://"):
+        return database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    if database_url.startswith("postgres+asyncpg://"):
+        return database_url.replace("postgres+asyncpg://", "postgres://", 1)
+    return database_url
+
+
 _pool: asyncpg.Pool | None = None
 _pool_lock = asyncio.Lock()
 
@@ -74,7 +82,9 @@ async def get_postgres_pool(database_url: str) -> asyncpg.Pool:
     if _pool is None:
         async with _pool_lock:
             if _pool is None:
-                _pool = await asyncpg.create_pool(database_url, min_size=1, max_size=10)
+                _pool = await asyncpg.create_pool(
+                    _normalize_database_url(database_url), min_size=1, max_size=10
+                )
     return _pool
 
 
