@@ -5,7 +5,7 @@
     }
 
     handle {
-        redir https://{$PUBLIC_HOST:72.56.70.155}{uri} permanent
+        redir https://{$PUBLIC_HOST:72.56.70.155}:8443{uri} permanent
     }
 }
 

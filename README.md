@@ -66,7 +66,7 @@ cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --build
 ```
 
-При запуске контейнера миграции Alembic применяются автоматически. `MINI_APP_URL` должен быть доступен по HTTPS; доменное имя не обязательно, если используется HTTPS на публичном IP.
+При запуске контейнера миграции Alembic применяются автоматически. `MINI_APP_URL` должен быть доступен по HTTPS; доменное имя не обязательно, если используется HTTPS на публичном IP. Чтобы оставить внешний порт 443 свободным для VPN, Mini App работает по адресу `https://72.56.70.155:8443/`. На VPS задайте такой же `MINI_APP_URL` в `.env` и разрешите входящие TCP-подключения на порт 8443 в firewall. Бот применяет адрес кнопки меню при запуске.
 
 ### Полезные команды
 
@@ -193,7 +193,9 @@ CD запускается после успешного CI при push в тек
 - подключается к VPS по SSH;
 - выполняет fast-forward обновление репозитория;
 - пересобирает и перезапускает PostgreSQL, бота и Caddy;
-- проверяет `/healthz`.
+- проверяет `https://<VPS_HOST>:8443/healthz`.
+
+Если VPS Secrets ещё не добавлены, CI завершится, а шаг деплоя будет пропущен.
 
 Для CD в настройках GitHub-репозитория нужно добавить secrets:
 
@@ -212,6 +214,7 @@ CD запускается после успешного CI при push в тек
 ```bash
 cd /root/Listik-bot
 git pull --ff-only origin feature/mini-app-migration
+# В .env установить MINI_APP_URL=https://72.56.70.155:8443/
 docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --build
 ```
 

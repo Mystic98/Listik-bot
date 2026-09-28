@@ -36,7 +36,7 @@ services:
       PUBLIC_HOST: ${PUBLIC_HOST:-72.56.70.155}
     ports:
       - "80:80"
-      - "443:443"
+      - "8443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./certbot/conf:/etc/letsencrypt:ro
